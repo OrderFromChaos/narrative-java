@@ -11,6 +11,7 @@ Usage:
     $ python3 javachecks.py src/main/java --since origin/dev
     $ python3 javachecks.py src/main/java --pmd build/narrative/pmd.xml --checkstyle build/narrative/checkstyle.xml
     $ python3 javachecks.py src/main/java --prose
+    $ python3 javachecks.py src/main/java --cache build/narrative/prose-cache.json
 
 One line per finding, and a warning has the word `warning` before its code:
 
@@ -22,6 +23,10 @@ merge-base(HEAD, REF) adds or changes. The lines of a prose finding are the line
 For a finding on a method, they are the lines of the method, and for a finding on a type, the line of
 its declaration.
 
+With --cache PATH, the spaCy results of each passage are kept in PATH between runs, keyed by the
+text of the passage. The cache is discarded when agentverbs.py, words.json, spaCy or its model
+changes, and spaCy is loaded only when a passage is not in the cache.
+
 Exit codes:
     0  no finding. Warnings may be printed
     1  at least one finding
@@ -31,6 +36,10 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import bisect
+import hashlib
+import importlib.metadata
+import json
 import re
 import subprocess
 import sys
@@ -47,6 +56,22 @@ from prose import Passage
 
 WORDS_PATH = Path(__file__).resolve().parent / 'words.json'
 SKIPPED_DIRS = frozenset({'.git', '.gradle', 'build', 'run', 'out', 'bin'})
+# a text block, a string or character literal, a // comment or a /* comment. The literals are matched
+# so that a // or /* inside one is not read as a comment
+# matches:
+# `"""` then a text block then `"""`
+# `"a // b"`
+# `'"'`
+# `// a comment`
+# `/** a javadoc */`
+JAVA_TOKEN = re.compile(
+    r'"""(?:\\.|[^\\])*?(?:"""|\Z)'
+    r'|"(?:\\.|[^"\\\n])*"?'
+    r"|'(?:\\.|[^'\\\n])*'?"
+    r'|//[^\n]*'
+    r'|/\*.*?(?:\*/|\Z)',
+    re.DOTALL,
+)
 # Checkstyle check name, without the Check suffix: the NAR code
 CHECKSTYLE_CODES = {
     'MethodName': 'NAR130',
@@ -75,6 +100,7 @@ def main() -> int:
     parser.add_argument('--javac', type=Path, help='the Gradle output of the compileJava run')
     parser.add_argument('--since', help='report only lines changed since merge-base(HEAD, SINCE)')
     parser.add_argument('--prose', action='store_true', help='list every comment summary and review pair')
+    parser.add_argument('--cache', type=Path, help='a file that keeps the spaCy results between runs')
     args = parser.parse_args()
 
     java_paths = discoverJava(args.paths)
@@ -93,15 +119,20 @@ def main() -> int:
         print(f'javachecks.py: no line changed since {args.since}', file=sys.stderr)
         return EXIT_UNREADABLE
 
-    reader = agentverbs.SentenceReader.load(WORDS_PATH)
+    # under --since, a file with no changed line can have no finding
+    if changed is not None:
+        java_paths = [java_path for java_path in java_paths if java_path.resolve() in changed]
+    prose = ProseReader.open(args.cache)
     if args.prose:
-        for line in proseInventory(reader, java_paths, changed):
+        for line in proseInventory(prose, java_paths, changed):
             print(line)
+        prose.save()
         return EXIT_SUCCESS
 
     findings: list[JavaFinding] = []
     for java_path in java_paths:
-        findings.extend(checkFile(reader, java_path, tool_findings.get(java_path.resolve(), []), changed))
+        findings.extend(checkFile(prose, java_path, tool_findings.get(java_path.resolve(), []), changed))
+    prose.save()
     for finding in findings:
         print(finding)
     failing = [finding for finding in findings if not finding.warning]
@@ -263,7 +294,7 @@ def runGit(arguments: list[str], repo_path: Path) -> str:
 
 
 def proseInventory(
-    reader: agentverbs.SentenceReader,
+    prose: ProseReader,
     java_paths: list[Path],
     changed: ChangedLines | None,
 ) -> list[str]:
@@ -276,7 +307,7 @@ def proseInventory(
             if inChange(changed, java_path, set(passage.lines)):
                 summaries.append(f'{java_path}:{passage.lines[0]}: {passage.texts[0]}')
                 pairs.extend(
-                    f'{java_path}:{passage.lineOf(pair)}: {pair!r}' for pair in reader.reviewPairs(passage.text)
+                    f'{java_path}:{passage.lineOf(pair)}: {pair!r}' for pair in prose.reviewPairs(passage.text)
                 )
     return [
         '--- every comment and javadoc summary: read each against SKILL.md, Comments ---',
@@ -287,7 +318,7 @@ def proseInventory(
 
 
 def checkFile(
-    reader: agentverbs.SentenceReader,
+    prose: ProseReader,
     java_path: Path,
     tool_findings: list[ToolFinding],
     changed: ChangedLines | None,
@@ -300,17 +331,24 @@ def checkFile(
     source = java_path.read_text(encoding='utf-8', errors='replace')
     lines = source.splitlines()
     reading = readComments(source)
-    passage_lines = {line: frozenset(passage.lines) for passage in reading.passages for line in passage.lines}
+    # a finding on a passage counts under --since when a line of the passage changed
+    passages = [passage for passage in reading.passages if inChange(changed, java_path, set(passage.lines))]
+    passage_lines = {line: frozenset(passage.lines) for passage in passages for line in passage.lines}
+    prose_lines = [pair for passage in passages for pair in zip(passage.lines, passage.texts, strict=True)]
     candidates: list[tuple[JavaFinding, frozenset[int]]] = []
 
-    for wording in checks.wordingFindings(reading.prose_lines, reading.list_items, java_path):
+    for wording in checks.wordingFindings(prose_lines, reading.list_items, java_path):
         finding = JavaFinding(java_path, wording.line, wording.code, wording.detail)
         candidates.append((finding, passage_lines.get(wording.line, frozenset({wording.line}))))
-    for verb in agentverbs.passageFindings(reader, java_path, reading.passages, set(), set()):
-        finding = JavaFinding(java_path, verb.line, verb.code, repr(verb.hit))
-        candidates.append((finding, passage_lines.get(verb.line, frozenset({verb.line}))))
+    for passage in passages:
+        agent_hits, fragment_heads = prose.passageHits(passage.text)
+        for code, hits in ((agentverbs.CODE, agent_hits), (agentverbs.FRAGMENT_CODE, fragment_heads)):
+            for hit in hits:
+                candidates.append(
+                    (JavaFinding(java_path, passage.lineOf(hit), code, repr(hit)), frozenset(passage.lines)),
+                )
     candidates.extend((finding, frozenset({finding.line})) for finding in commentFindings(java_path, lines, reading))
-    masked = maskLiterals(source)
+    masked = maskLiterals(source) if any(tool_finding.code == 'NAR116' for tool_finding in tool_findings) else ''
     for tool_finding in tool_findings:
         # a PMD violation of a method is at the method name. The end of a NAR116 method is found by its braces
         last_line = (
@@ -338,27 +376,7 @@ def checkFile(
 
 def maskLiterals(source: str) -> str:
     """Return the source with every comment and literal blanked, keeping each newline."""
-    masked = list(source)
-    index = 0
-    while index < len(source):
-        if source.startswith('"""', index):
-            end = textBlockEnd(source, index + 3)
-        elif source[index] in '"\'':
-            end = quotedEnd(source, index)
-        elif source.startswith('//', index):
-            newline = source.find('\n', index)
-            end = len(source) if newline < 0 else newline
-        elif source.startswith('/*', index):
-            close = source.find('*/', index + 2)
-            end = len(source) if close < 0 else close + 2
-        else:
-            index += 1
-            continue
-        for position in range(index, end):
-            if masked[position] != '\n':
-                masked[position] = ' '
-        index = end
-    return ''.join(masked)
+    return JAVA_TOKEN.sub(lambda token: re.sub(r'[^\n]', ' ', token[0]), source)
 
 
 def methodEndLine(masked: str, first_line: int) -> int:
@@ -403,68 +421,24 @@ def readComments(source: str) -> CommentReading:
 
 def lexComments(source: str) -> list[Comment]:
     """Find every comment, skipping string literals, character literals and text blocks."""
+    newlines = [index for index, char in enumerate(source) if char == '\n']
     comments: list[Comment] = []
-    index = 0
-    line = 1
-    line_start = 0
-    while index < len(source):
-        if source[index] == '\n':
-            line += 1
-            line_start = index + 1
-            index += 1
-        elif source.startswith('"""', index):
-            end = textBlockEnd(source, index + 3)
-            if '\n' in source[index:end]:
-                line += source.count('\n', index, end)
-                line_start = source.rfind('\n', 0, end) + 1
-            index = end
-        elif source[index] in '"\'':
-            index = quotedEnd(source, index)
-        elif source.startswith('//', index):
-            end = source.find('\n', index)
-            end = len(source) if end < 0 else end
-            trailing = bool(source[line_start:index].strip())
-            comments.append(Comment(CommentKind.LINE, ((line, source[index + 2 : end]),), index - line_start, trailing))
-            index = end
-        elif source.startswith('/*', index):
-            close = source.find('*/', index + 2)
-            end = len(source) if close < 0 else close + 2
-            body = source[index + 2 : max(index + 2, end - 2)]
-            kind = CommentKind.JAVADOC if body.startswith('*') and body.strip('*').strip() else CommentKind.BLOCK
-            texts = tuple((line + offset, text) for offset, text in enumerate(body.removeprefix('*').split('\n')))
-            comments.append(Comment(kind, texts, index - line_start, bool(source[line_start:index].strip())))
-            if '\n' in source[index:end]:
-                line += source.count('\n', index, end)
-                line_start = source.rfind('\n', 0, end) + 1
-            index = end
-        else:
-            index += 1
+    for token in JAVA_TOKEN.finditer(source):
+        text = token[0]
+        if not text.startswith('/'):
+            continue
+        start = token.start()
+        line_index = bisect.bisect_left(newlines, start)
+        line_start = newlines[line_index - 1] + 1 if line_index else 0
+        trailing = bool(source[line_start:start].strip())
+        if text.startswith('//'):
+            comments.append(Comment(CommentKind.LINE, ((line_index + 1, text[2:]),), start - line_start, trailing))
+            continue
+        body = text[2:-2] if text.endswith('*/') and len(text) >= 4 else text[2:]
+        kind = CommentKind.JAVADOC if body.startswith('*') and body.strip('*').strip() else CommentKind.BLOCK
+        texts = tuple((line_index + 1 + offset, part) for offset, part in enumerate(body.removeprefix('*').split('\n')))
+        comments.append(Comment(kind, texts, start - line_start, trailing))
     return comments
-
-
-def textBlockEnd(source: str, index: int) -> int:
-    while index < len(source):
-        if source[index] == '\\':
-            index += 2
-        elif source.startswith('"""', index):
-            return index + 3
-        else:
-            index += 1
-    return len(source)
-
-
-def quotedEnd(source: str, index: int) -> int:
-    """Return the index after a string or character literal, or the newline of an unclosed one."""
-    quote = source[index]
-    index += 1
-    while index < len(source) and source[index] != '\n':
-        if source[index] == '\\':
-            index += 2
-        elif source[index] == quote:
-            return index + 1
-        else:
-            index += 1
-    return index
 
 
 def groupBlocks(comments: list[Comment]) -> list[list[Comment]]:
@@ -831,6 +805,77 @@ class JavaFinding:
         return f'{self.java_path}:{self.line}: {prefix}{self.code} {self.detail}'
 
 
+class ProseReader:
+    """The agent-verb checks of agentverbs.py, with the results of each passage text cached.
+
+    spaCy is loaded at the first passage that is not in the cache.
+    """
+
+    def __init__(self, cache_path: Path | None, key: str, entries: dict[str, PassageResults]) -> None:
+        self.cache_path = cache_path
+        self.key = key
+        self.entries = entries
+        self.reader: agentverbs.SentenceReader | None = None
+        self.changed = False
+
+    @classmethod
+    def open(cls, cache_path: Path | None) -> ProseReader:
+        """Read the cache, or start an empty one when it is absent, unreadable or of another version."""
+        versions = [
+            hashlib.sha256(Path(agentverbs.__file__).read_bytes()).hexdigest(),
+            hashlib.sha256(WORDS_PATH.read_bytes()).hexdigest(),
+            importlib.metadata.version('spacy'),
+            importlib.metadata.version(agentverbs.MODEL),
+        ]
+        key = ' '.join(versions)
+        entries: dict[str, PassageResults] = {}
+        if cache_path is not None and cache_path.is_file():
+            try:
+                stored = json.loads(cache_path.read_text(encoding='utf-8'))
+            except (OSError, json.JSONDecodeError):
+                stored = {}
+            if isinstance(stored, dict) and stored.get('key') == key and isinstance(stored.get('entries'), dict):
+                entries = stored['entries']
+        return cls(cache_path, key, entries)
+
+    def passageHits(self, text: str) -> tuple[list[str], list[str]]:
+        """Return the NAR017 hits and the NAR020 clause heads of one passage text."""
+        entry = self.entries.setdefault(self.digest(text), {})
+        if 'verbs' not in entry:
+            entry['verbs'] = self.sentenceReader().agentVerbs(text)
+            entry['heads'] = self.sentenceReader().fragments(text)
+            self.changed = True
+        return entry['verbs'], entry['heads']
+
+    def reviewPairs(self, text: str) -> list[str]:
+        entry = self.entries.setdefault(self.digest(text), {})
+        if 'pairs' not in entry:
+            entry['pairs'] = self.sentenceReader().reviewPairs(text)
+            self.changed = True
+        return entry['pairs']
+
+    def sentenceReader(self) -> agentverbs.SentenceReader:
+        if self.reader is None:
+            self.reader = agentverbs.SentenceReader.load(WORDS_PATH)
+        return self.reader
+
+    def save(self) -> None:
+        """Write the cache when an entry was added. A temporary file and a rename keep it whole."""
+        if self.cache_path is None or not self.changed:
+            return
+
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = self.cache_path.with_suffix('.tmp')
+        temporary_path.write_text(json.dumps({'key': self.key, 'entries': self.entries}), encoding='utf-8')
+        temporary_path.replace(self.cache_path)
+
+    @staticmethod
+    def digest(text: str) -> str:
+        return hashlib.sha1(text.encode('utf-8')).hexdigest()
+
+
+# the cached results of one passage text: 'verbs', 'heads' and 'pairs', each a list of hits
+PassageResults = dict[str, list[str]]
 ToolFindings = dict[Path, list[ToolFinding]]
 ChangedLines = dict[Path, set[int]]
 

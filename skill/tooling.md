@@ -98,6 +98,22 @@ Below is *why* each non-obvious setting is there.
 - A type-pattern switch over a type that is not sealed, such as an NEI handler object, needs its
   `default` arm, and `NAR107` leaves it alone.
 
+## Caches
+
+Everything below is in `build/narrative/` of the project, and a repeat run skips the work it covers.
+
+- `prose-cache.json`: the spaCy results of each comment passage, keyed by its text. It is discarded
+  when `agentverbs.py`, `words.json`, spaCy or its model changes. spaCy is loaded only for a passage
+  that is not in it.
+- `checkstyle.cache`, and the incremental cache of the PMD task: the files with no change since the
+  last run are not analysed again.
+- `javac.log`: the output of the last compile.
+- The reports themselves. A Checkstyle or PMD task with no changed input is up to date, and its
+  report stays valid.
+
+Under `--since`, only the passages on changed lines go to spaCy, Checkstyle and PMD read only the
+changed files, and an empty diff is exit 2 before Gradle starts.
+
 ## Gotchas
 
 **tree-sitter-java 0.23.5 cannot parse current GTNH code.** Record patterns
@@ -126,7 +142,9 @@ now covers `Throwable` and `Error`, by exact type, so `catch (NoClassDefFoundErr
 **javac with `-XDrawDiagnostics` prints the file name only**, and not the directory, so a warning
 is ambiguous in a project with two `Flagged.java` files. The init script uses the standard format, which has the full path.
 
-**compileJava prints no warning when it is up to date.** `verify.py` runs it with `--rerun`.
+**compileJava prints no warning when it is up to date.** Incremental compilation is off in the init
+script, so a compile covers every file. `verify.py` keeps the output of the last compile as
+`javac.log` and reads it again while compileJava is up to date.
 
 **In GTNHGradle, the Checkstyle extension is set after an `allprojects` block runs**
 (`CodeStyleModule.java`), so a value set there is overwritten. Separate tasks are registered in the

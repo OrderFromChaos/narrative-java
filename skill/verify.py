@@ -50,6 +50,7 @@ GRADLEW = 'gradlew.bat' if sys.platform == 'win32' else 'gradlew'
 # the GTNHGradle enableModernJavaSyntax values for Java 25 with the modern library
 JAVA_25_SYNTAX = frozenset({'jvmDowngrader', 'modern'})
 REPORT_DIR = Path('build/narrative')
+CHECK_TASKS = ('narrativeCheckstyle', 'narrativePmd')
 EXIT_SUCCESS = 0
 EXIT_FINDINGS = 1
 EXIT_NO_TOOLCHAIN = 2
@@ -87,12 +88,23 @@ def main() -> int:
 
     report_dir = project_dir / REPORT_DIR
     sources = args.paths or [project_dir / 'src' / 'main' / 'java']
+    try:
+        changed_files = readChangedFiles(args.since, project_dir) if args.since else None
+    except PrerequisiteError as exc:
+        print(f'verify.py: {exc}', file=sys.stderr)
+        return EXIT_NO_TOOLCHAIN
+
+    if changed_files is not None and not changed_files:
+        print(f'verify.py: no line changed since {args.since}', file=sys.stderr)
+        return EXIT_NO_TOOLCHAIN
+
     ruleset_path = writeRuleset(sources, report_dir)
     gradle_run = runGradle(
         gradle_command,
         settings,
         report_dir,
         ruleset_path,
+        changed_files,
         fix=not args.no_fix,
         max_workers=args.max_workers,
     )
@@ -105,6 +117,11 @@ def main() -> int:
         print(gradle_run.output_tail)
         return EXIT_FINDINGS
 
+    if gradle_run.missing_tasks:
+        print(f'verify.py: Gradle did not run {", ".join(gradle_run.missing_tasks)}', file=sys.stderr)
+        print(gradle_run.output_tail, file=sys.stderr)
+        return EXIT_NO_TOOLCHAIN
+
     reports = [report_dir / 'pmd.xml', report_dir / 'checkstyle.xml', report_dir / 'javac.log']
     if missing_reports := [str(report) for report in reports if not report.is_file()]:
         print(f'verify.py: Gradle wrote no {", ".join(missing_reports)}', file=sys.stderr)
@@ -112,6 +129,7 @@ def main() -> int:
 
     targets = [str(path) for path in sources]
     since = ['--since', args.since] if args.since else []
+    since.extend(['--cache', str(report_dir / 'prose-cache.json')])
     report_arguments = ['--pmd', str(reports[0]), '--checkstyle', str(reports[1]), '--javac', str(reports[2])]
     checked = subprocess.run(
         [str(venv_python), str(SKILL_DIR / 'javachecks.py'), *targets, *report_arguments, *since],
@@ -238,51 +256,106 @@ def writeRuleset(source_paths: list[Path], report_dir: Path) -> Path:
     return ruleset_path
 
 
+def readChangedFiles(since: str, project_dir: Path) -> list[Path]:
+    """List the Java source files with lines added or changed since merge-base(HEAD, since), and the untracked ones.
+
+    Raises:
+        PrerequisiteError: git fails, or there is no commit `since`.
+    """
+    root = Path(runGit(['rev-parse', '--show-toplevel'], project_dir).strip())
+    base = runGit(['merge-base', 'HEAD', since], root).strip()
+    names = [
+        *runGit(['diff', '-M', '--name-only', '--diff-filter=d', base, '--', '*.java'], root).splitlines(),
+        *runGit(['ls-files', '--others', '--exclude-standard', '--', '*.java'], root).splitlines(),
+    ]
+    return sorted({(root / name).resolve() for name in names})
+
+
+def runGit(arguments: list[str], repo_path: Path) -> str:
+    """Run one git command in the repository.
+
+    Raises:
+        PrerequisiteError: git exits nonzero.
+    """
+    result = subprocess.run(['git', '-C', str(repo_path), *arguments], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise PrerequisiteError(f'git {" ".join(arguments)} failed: {result.stderr.strip()}')
+    return result.stdout
+
+
 def runGradle(
     gradle_command: list[str],
     settings: GradleSettings,
     report_dir: Path,
     ruleset_path: Path,
+    changed_files: list[Path] | None,
     *,
     fix: bool,
     max_workers: int,
 ) -> GradleRun:
     """Run spotless, compileJava and narrativeCheck in one Gradle invocation, and keep its output.
 
-    The reports of an earlier run are removed first, so there is no report from a task that did not run.
-    compileJava runs with --rerun, so javac prints its warnings when the classes are up to date.
+    The reports and caches of earlier runs stay, so a task whose inputs did not change is up to date.
+    Incremental compilation is off in the init script, so compileJava compiles every file or none. Its
+    output is written to javac.log only in a run where it compiled. Under --since, Checkstyle and PMD
+    read only the files of changed-files.txt.
     """
-    for name in ('pmd.xml', 'checkstyle.xml', 'javac.log'):
-        (report_dir / name).unlink(missing_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    files_property: list[str] = []
+    if changed_files is not None:
+        files_path = report_dir / 'changed-files.txt'
+        files_path.write_text(''.join(f'{path}\n' for path in changed_files), encoding='utf-8')
+        files_property = [f'-Pnarrative.files={files_path}']
 
     spotless = (['spotlessApply'] if fix else ['spotlessCheck']) if settings.spotless else []
-    command = [
+    base_command = [
         *gradle_command,
         '--init-script',
         str(SKILL_DIR / 'narrative.init.gradle'),
+        '--console=plain',
         '--continue',
         '--no-configuration-cache',
         f'--max-workers={max_workers}',
         f'-Pnarrative.skillDir={SKILL_DIR}',
         f'-Pnarrative.reportDir={report_dir}',
         f'-Pnarrative.pmdRuleset={ruleset_path}',
-        *spotless,
-        'compileJava',
-        '--rerun',
-        'narrativeCheck',
+        *files_property,
     ]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        [*base_command, *spotless, 'compileJava', 'narrativeCheck'],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     output = result.stdout + result.stderr
-    (report_dir / 'javac.log').write_text(output, encoding='utf-8')
+    (report_dir / 'gradle.log').write_text(output, encoding='utf-8')
+    # matches:
+    # `> Task :compileJava`
+    # rejects:
+    # `> Task :compileJava UP-TO-DATE`
+    if re.search(r'^> Task \S*:compileJava$', output, re.MULTILINE):
+        (report_dir / 'javac.log').write_text(output, encoding='utf-8')
+    elif not (report_dir / 'javac.log').is_file():
+        # up to date, with no log of the run that compiled. Compile once more for the warnings
+        rerun = subprocess.run([*base_command, 'compileJava', '--rerun'], capture_output=True, text=True, check=False)
+        (report_dir / 'javac.log').write_text(rerun.stdout + rerun.stderr, encoding='utf-8')
+
     failed = sorted(
         set(re.findall(r"Execution failed for task '([^']+)'", output))
         | set(re.findall(r'^> Task (\S+) FAILED$', output, re.MULTILINE)),
     )
+    ran = {task for task in CHECK_TASKS if re.search(rf'^> Task \S*:{task}(?: UP-TO-DATE)?$', output, re.MULTILINE)}
     # matches:
     # `> Cannot find a Java installation on your machine (Linux amd64) matching: {languageVersion=8, ...}`
     missing_jdk = re.search(r'Cannot find a Java installation on your machine.*', output)
     tail = '\n'.join(output.splitlines()[-40:])
-    return GradleRun(result.returncode, failed, tail, missing_jdk[0] if missing_jdk else '')
+    return GradleRun(
+        result.returncode,
+        failed,
+        sorted(set(CHECK_TASKS) - ran),
+        tail,
+        missing_jdk[0] if missing_jdk else '',
+    )
 
 
 ### vocabulary #########################################################################################
@@ -301,6 +374,7 @@ class GradleSettings:
 class GradleRun:
     exit_code: int
     failed_tasks: list[str]
+    missing_tasks: list[str]
     output_tail: str
     missing_jdk: str
 
