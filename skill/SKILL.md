@@ -561,7 +561,35 @@ A conversion takes a table of cases rather than a sentence per case:
 
 ### Javadoc rules
 
-The summary sentence is mandatory. **A body is not, and usually does not earn its place.** (R9-09)
+**Most members get no javadoc.** A top-level type (`NAR118`) and a method over the contract
+threshold (`NAR116`) need one. Any other field, constant or method gets a javadoc only for a fact
+that its name, type, value and signature do not show. A javadoc whose facts are already in the
+declaration only costs the reader time. Cut such a javadoc whole, not sentence by sentence. The Java
+habit of a javadoc on every public member does not apply here. (J1-F07)
+
+**State each fact once**, on the declaration the fact belongs to. Elsewhere, link to that
+declaration. (J1-F07)
+
+```java
+public static final int ITEM_PIPE_CASING_TIERS = 8;
+public static final int PIPE_CASING_TIERS = 4;
+
+/** @param tier from 1 to {@link #PIPE_CASING_TIERS} */
+public static ItemList pipeCasing(int tier) {
+```
+
+not
+
+```java
+/** How many item pipe casings {@link #chainItemPipeCasings} accepts, numbered from 1. */
+public static final int ITEM_PIPE_CASING_TIERS = 8;
+
+/** How many pipe casings there are. {@link #pipeCasing} numbers them from 1. */
+public static final int PIPE_CASING_TIERS = 4;
+```
+
+A javadoc that is kept starts with a summary sentence. **A body is not required, and usually does
+not earn its place.** (R9-09)
 
 **Cut a sentence when any of these is true:**
 
