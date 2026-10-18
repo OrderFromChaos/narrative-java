@@ -4,7 +4,7 @@
   `j1`.
 - Every decision id cited in a Markdown file resolves: a `J1-` id in benchmark/decisions.jsonl here,
   every other id in benchmark/decisions.jsonl of the narrative-python checkout named in
-  skill/PROSE_SOURCE, else ../improved-ai-code-style. A doc that states the current rules (skill/
+  skill/PROSE_SOURCE, else ../narrative-python. A doc that states the current rules (skill/
   and README.md) cites no superseded id.
 - Every NAR code named in a Markdown file is a code of checks.py, agentverbs.py, javachecks.py or
   pmd-ruleset.xml.
@@ -31,7 +31,7 @@ from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent
 SKILL_DIR = REPO_DIR / 'skill'
-DEFAULT_SOURCE_DIR = REPO_DIR.parent / 'improved-ai-code-style'
+DEFAULT_SOURCE_DIR = REPO_DIR.parent / 'narrative-python'
 COPIED_FILES = ('checks.py', 'agentverbs.py', 'prose.py', 'words.json', 'requirements-lock.txt')
 DECISION_FIELDS = ('id', 'dimension', 'round', 'kind', 'options', 'choice', 'strength', 'condition', 'note', 'date')
 DECISION_ROUNDS = frozenset({'j1'})

@@ -3,7 +3,7 @@
 narrative-java runs the prose checks of narrative-python unchanged, so the five files in COPIED_FILES
 are copies. Each copy writes skill/PROSE_SOURCE, with a path= line and a commit= line for the
 narrative-python checkout they came from. The file is local, and git ignores it. Without it, the
-checkout is ../improved-ai-code-style.
+checkout is ../narrative-python.
 
 With --check, nothing is copied, and a copy that differs from its source is an error.
 
@@ -32,7 +32,7 @@ COPIED_FILES = ('checks.py', 'agentverbs.py', 'prose.py', 'words.json', 'require
 REPO_DIR = Path(__file__).resolve().parent
 TARGET_SKILL_DIR = REPO_DIR / 'skill'
 SOURCE_RECORD_PATH = TARGET_SKILL_DIR / 'PROSE_SOURCE'
-DEFAULT_SOURCE_DIR = REPO_DIR.parent / 'improved-ai-code-style'
+DEFAULT_SOURCE_DIR = REPO_DIR.parent / 'narrative-python'
 EXIT_SUCCESS = 0
 EXIT_DIFFERS = 1
 EXIT_NO_SOURCE = 2
@@ -45,7 +45,7 @@ def main() -> int:
         'source_dir',
         nargs='?',
         type=Path,
-        help='the narrative-python checkout (default: the path in skill/PROSE_SOURCE, else ../improved-ai-code-style)',
+        help='the narrative-python checkout (default: the path in skill/PROSE_SOURCE, else ../narrative-python)',
     )
     parser.add_argument('--check', action='store_true', help='copy nothing, and exit 1 if a copy differs')
     args = parser.parse_args()
