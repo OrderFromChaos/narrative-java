@@ -1,0 +1,23 @@
+{
+  "name": "narrative-java",
+  "description": "The Narrative house style for GTNH Java mods as a Claude Code skill.",
+  "owner": {
+    "name": "Syris Norelli"
+  },
+  "plugins": [
+    {
+      "name": "narrative-java",
+      "description": "Write or review Java for GTNH mods in the Narrative house style, with a verified spotless/javac/Checkstyle/PMD toolchain.",
+      "author": {
+        "name": "Syris Norelli"
+      },
+      "homepage": "https://github.com/OrderFromChaos/narrative-java",
+      "license": "Apache-2.0",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skill"
+      ]
+    }
+  ]
+}
