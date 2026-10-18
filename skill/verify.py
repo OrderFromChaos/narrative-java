@@ -3,7 +3,9 @@
 Use this instead of calling the tools by hand. A missing tool, report or JDK is exit 2, so a pass
 means every check ran.
 
-The project is the current directory, a Gradle build with GTNHGradle. In one Gradle run, the code
+The project is the current directory, a Gradle build with GTNHGradle. First, javachecks.py --rewrap
+re-wraps ragged javadoc and whole-line // comments over 120 columns, unless --no-fix is given. Under
+--since, only changed lines are re-wrapped. Then, in one Gradle run, the code
 is formatted (spotlessApply, or spotlessCheck with --no-fix), compiled with the raw-type and
 unchecked warnings of javac, and checked with Checkstyle and PMD and the configs beside this script.
 Those tasks come from the init script narrative.init.gradle, so no project file changes. javachecks.py then reads the
@@ -15,7 +17,7 @@ Gradle project.
 Usage:
     $ python3 verify.py                          # the mod in the current directory
     $ python3 verify.py --since origin/dev       # only lines changed since merge-base(HEAD, origin/dev)
-    $ python3 verify.py --no-fix                 # spotlessCheck in place of spotlessApply
+    $ python3 verify.py --no-fix                 # no re-wrap, and spotlessCheck in place of spotlessApply
     $ python3 verify.py src/main/java/com/example/gui
     $ python3 verify.py README.md docs/page.html
 
@@ -61,7 +63,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description='Run the narrative-java toolchain.')
     parser.add_argument('paths', nargs='*', type=Path, help='Java source dirs or files, or pages for the prose checks')
     parser.add_argument('--since', help='report only lines changed since merge-base(HEAD, SINCE)')
-    parser.add_argument('--no-fix', action='store_true', help='run spotlessCheck in place of spotlessApply')
+    parser.add_argument('--no-fix', action='store_true', help='no re-wrap, and spotlessCheck in place of spotlessApply')
     parser.add_argument('--venv', type=Path, default=SHARED_VENV, help=f'the lint venv (default: {SHARED_VENV})')
     parser.add_argument('--gradle', help='the Gradle command, in place of ./gradlew')
     parser.add_argument('--max-workers', type=int, default=2, help='the Gradle worker limit (default: 2)')
@@ -97,6 +99,11 @@ def main() -> int:
     if changed_files is not None and not changed_files:
         print(f'verify.py: no line changed since {args.since}', file=sys.stderr)
         return EXIT_NO_TOOLCHAIN
+
+    # before Gradle, because splitting a // comment moves every later line of the file, and Gradle must see
+    # the final lines
+    if not args.no_fix:
+        print(f'rewrap         {rewrapComments(venv_python, sources, args.since)}', flush=True)
 
     ruleset_path = writeRuleset(sources, report_dir)
     gradle_run = runGradle(
@@ -147,6 +154,20 @@ def main() -> int:
         print('Fix the findings above, then read the lists below.', flush=True)
     subprocess.run([str(venv_python), str(SKILL_DIR / 'javachecks.py'), *targets, *since, '--prose'], check=False)
     return checked.returncode
+
+
+def rewrapComments(venv_python: Path, sources: list[Path], since: str | None) -> str:
+    """Re-wrap ragged javadoc and long // comments in place, with javachecks.py --rewrap.
+
+    Returns:
+        A summary: the number of files re-wrapped, or the error of javachecks.py.
+    """
+    since_arguments = ['--since', since] if since else []
+    command = [str(venv_python), str(SKILL_DIR / 'javachecks.py'), '--rewrap', *map(str, sources), *since_arguments]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != EXIT_SUCCESS:
+        return f'not run: {result.stderr.strip()}'
+    return f'{len(result.stdout.splitlines())} files re-wrapped'
 
 
 def readInstalledVersion() -> str:

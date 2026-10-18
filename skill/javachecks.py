@@ -59,6 +59,13 @@ WORDS_PATH = Path(__file__).resolve().parent / 'words.json'
 SKIPPED_DIRS = frozenset({'.git', '.gradle', 'build', 'run', 'out', 'bin'})
 # the comment line length of the GTNH Eclipse formatter, counted from the column where the comment starts
 JAVADOC_WIDTH = 120
+# an inline tag such as `{@link Plan#read}` cannot be split, so a word is the whole tag
+# matches:
+# `{@link Plan#read(Path, int)}`
+# `float,`
+JAVADOC_WORD = re.compile(r'\{@[^}]*\}\S*|\S+')
+# after a javadoc line that ends with one of these, the line break stays
+SENTENCE_ENDS = ('.', '!', '?', ':', '>')
 # a text block, a string or character literal, a // comment or a /* comment. The literals are matched
 # so that a // or /* inside one is not read as a comment
 # matches:
@@ -104,6 +111,7 @@ def main() -> int:
     parser.add_argument('--since', help='report only lines changed since merge-base(HEAD, SINCE)')
     parser.add_argument('--prose', action='store_true', help='list every comment summary and review pair')
     parser.add_argument('--cache', type=Path, help='a file that keeps the spaCy results between runs')
+    parser.add_argument('--rewrap', action='store_true', help='re-wrap ragged javadoc and long // comments in place')
     args = parser.parse_args()
 
     java_paths = discoverJava(args.paths)
@@ -125,6 +133,15 @@ def main() -> int:
     # under --since, a file with no changed line can have no finding
     if changed is not None:
         java_paths = [java_path for java_path in java_paths if java_path.resolve() in changed]
+    if args.rewrap:
+        for java_path in java_paths:
+            source = java_path.read_text(encoding='utf-8')
+            rewrapped = rewrapSource(source, changed[java_path.resolve()] if changed is not None else None)
+            if rewrapped != source:
+                java_path.write_text(rewrapped, encoding='utf-8')
+                print(f'{java_path}: re-wrapped')
+        return EXIT_SUCCESS
+
     prose = ProseReader.open(args.cache)
     if args.prose:
         for line in proseInventory(prose, java_paths, changed):
@@ -669,16 +686,14 @@ def raggedLines(java_path: Path, lines: list[str], comment: Comment) -> list[Jav
     paragraph wrapped by hand at 100 columns passes. Two kinds of line are not flagged: a line that ends
     a sentence, and a line followed by a line that opens with the same word (`page 2: …` / `page 8: …`).
     """
-    # an inline tag such as `{@link Plan#read}` cannot be split, so NEXT_WORD matches the whole tag
-    NEXT_WORD = re.compile(r'\{@[^}]*\}\S*|\S+')
     findings: list[JavaFinding] = []
     for paragraph in javadocParagraphs(lines, comment):
         widths = {number: len(lines[number - 1].rstrip()) - comment.column for number, _text in paragraph}
         limit = min(max(widths.values()), JAVADOC_WIDTH)
         for (number, text), (_next_number, next_text) in itertools.pairwise(paragraph):
-            if text.endswith(('.', '!', '?', ':', '>')) or text.split()[0] == next_text.split()[0]:
+            if keepsBreak(text, next_text):
                 continue
-            word = NEXT_WORD.match(next_text)
+            word = JAVADOC_WORD.match(next_text)
             if word is not None and widths[number] + 1 + len(word[0]) <= limit:
                 detail = (
                     f'javadoc line ends at column {widths[number]}, and {word[0]!r} from the next line fits in the'
@@ -716,6 +731,127 @@ def javadocParagraphs(lines: list[str], comment: Comment) -> list[list[tuple[int
         current.append((number, text))
     paragraphs.append(current)
     return [paragraph for paragraph in paragraphs if len(paragraph) > 1]
+
+
+def keepsBreak(text: str, next_text: str) -> bool:
+    """Tell whether the break after a javadoc line stays: the line ends a sentence, or the next opens with its word."""
+    return text.endswith(SENTENCE_ENDS) or text.split()[0] == next_text.split()[0]
+
+
+def rewrapSource(source: str, changed_lines: set[int] | None) -> str:
+    """Re-wrap the comments of one Java source. No word of a comment changes, only its line breaks.
+
+    A javadoc paragraph with a NAR125 finding is filled again, to the width of its widest line, at
+    most 120 columns from the column of `/**`. A line break with no `NAR125` finding stays. A
+    whole-line `//` comment over 120 columns is split onto more `//` lines, each at most 120 columns. Under
+    --since, only a paragraph or a `//` line with a changed line is re-wrapped. A javadoc paragraph
+    on a line with `/**` or `*/` is left as it is.
+
+    Returns:
+        The source, with only the line breaks of the re-wrapped comments changed.
+    """
+    lines = source.split('\n')
+    replacements: list[Replacement] = []
+    for comment in lexComments(source):
+        if comment.trailing:
+            continue
+        if comment.kind is CommentKind.JAVADOC:
+            replacements.extend(refillJavadoc(lines, comment, changed_lines))
+        elif comment.kind is CommentKind.LINE:
+            replacements.extend(splitLongLine(lines, comment, changed_lines))
+    # replace from the bottom up, because a replacement can change the number of every later line
+    for replacement in sorted(replacements, key=lambda replacement: replacement.first_line, reverse=True):
+        lines[replacement.first_line - 1 : replacement.last_line] = replacement.new_lines
+    return '\n'.join(lines)
+
+
+def refillJavadoc(
+    lines: list[str],
+    comment: Comment,
+    changed_lines: set[int] | None,
+) -> list[Replacement]:
+    """Fill each ragged paragraph of one javadoc again, one run of lines between kept breaks at a time.
+
+    Returns:
+        A replacement for each run that changes.
+    """
+    # matches:
+    # `     * the plan file`
+    # rejects:
+    # `    /** the plan file`
+    MARGIN = re.compile(r'^\s*\*(?!/)\s*')
+    ragged = {finding.line for finding in raggedLines(Path(), lines, comment)}
+    replacements: list[Replacement] = []
+    for paragraph in javadocParagraphs(lines, comment):
+        numbers = [number for number, _text in paragraph]
+        margins = [found[0] for number in numbers if (found := MARGIN.match(lines[number - 1]))]
+        plain = len(margins) == len(numbers) and not any('/**' in lines[n - 1] or '*/' in lines[n - 1] for n in numbers)
+        touched = changed_lines is None or bool(changed_lines & set(numbers))
+        if not (touched and plain and ragged & set(numbers)):
+            continue
+        limit = min(max(len(lines[number - 1].rstrip()) - comment.column for number in numbers), JAVADOC_WIDTH)
+        margin_of = dict(zip(numbers, margins, strict=True))
+        # a continuation line of a block tag gets the indent of the paragraph's second line
+        continuation = margins[1] if len(margins) > 1 else margins[0]
+        run: list[tuple[int, str]] = []
+        for index, (number, text) in enumerate(paragraph):
+            run.append((number, text))
+            if index < len(paragraph) - 1 and not keepsBreak(text, paragraph[index + 1][1]):
+                continue
+            words = JAVADOC_WORD.findall(' '.join(run_text for _number, run_text in run))
+            filled = fillWords(
+                words,
+                first_margin=margin_of[run[0][0]],
+                margin=continuation,
+                column=comment.column,
+                limit=limit,
+            )
+            if filled != [lines[run_number - 1] for run_number, _text in run]:
+                replacements.append(Replacement(run[0][0], run[-1][0], filled))
+            run = []
+    return replacements
+
+
+def splitLongLine(
+    lines: list[str],
+    comment: Comment,
+    changed_lines: set[int] | None,
+) -> list[Replacement]:
+    """Split a whole-line `//` comment over 120 columns onto more `//` lines, each at most 120 columns.
+
+    Returns:
+        A replacement for the line, or none when the line fits or did not change.
+    """
+    number = comment.first_line
+    raw_line = lines[number - 1]
+    if len(raw_line.rstrip()) - comment.column <= JAVADOC_WIDTH:
+        return []
+    if changed_lines is not None and number not in changed_lines:
+        return []
+    margin = raw_line[: comment.column] + '// '
+    words = raw_line[comment.column + 2 :].split()
+    filled = fillWords(words, first_margin=margin, margin=margin, column=comment.column, limit=JAVADOC_WIDTH)
+    return [Replacement(number, number, filled)] if len(filled) > 1 else []
+
+
+def fillWords(words: list[str], *, first_margin: str, margin: str, column: int, limit: int) -> list[str]:
+    """Fill lines greedily, with no line wider than limit from column. A longer word gets a separate line.
+
+    Returns:
+        The lines, each with its margin.
+    """
+    filled: list[str] = []
+    current = ''
+    for word in words:
+        candidate = f'{current} {word}' if current else f'{first_margin if not filled else margin}{word}'
+        if current and len(candidate) - column > limit:
+            filled.append(current)
+            current = f'{margin}{word}'
+        else:
+            current = candidate
+    if current:
+        filled.append(current)
+    return filled
 
 
 def lineAboveAnnotations(lines: list[str], declaration_line: int) -> int:
@@ -888,6 +1024,15 @@ class JavaFinding:
     def __str__(self) -> str:
         prefix = 'warning ' if self.warning else ''
         return f'{self.java_path}:{self.line}: {prefix}{self.code} {self.detail}'
+
+
+@dataclass(frozen=True)
+class Replacement:
+    """The new lines of a re-wrapped comment, in place of the lines from first_line to last_line."""
+
+    first_line: int
+    last_line: int
+    new_lines: list[str]
 
 
 @dataclass(frozen=True)

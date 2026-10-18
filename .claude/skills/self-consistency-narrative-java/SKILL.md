@@ -41,13 +41,14 @@ nothing.
    `pyproject.toml` is narrative-python's `skill/pyproject-snippet.toml`:
 
    ```bash
-   cd <scratch> && PATH=<narrative-python>/.lintenv/bin:$PATH <narrative-python>/.lintenv/bin/python <narrative-python>/skill/verify.py --venv <narrative-python>/.lintenv <repo>/skill/javachecks.py <repo>/skill/verify.py <repo>/tests/run_fixtures.py <repo>/sync_prose.py <repo>/verify_docs.py
+   cd <scratch> && PATH=<narrative-python>/.lintenv/bin:$PATH <narrative-python>/.lintenv/bin/python <narrative-python>/skill/verify.py --venv <narrative-python>/.lintenv <repo>/skill/javachecks.py <repo>/skill/verify.py <repo>/tests/run_fixtures.py <repo>/tests/run_rewrap.py <repo>/sync_prose.py <repo>/verify_docs.py
    ```
 
    All 7 checks must pass.
 
 5. **Fixtures**: `python3 tests/run_fixtures.py --gradle <gradle>` reports 0 files with the wrong
-   codes. One Gradle run at a time, at `nice -n 19`.
+   codes. One Gradle run at a time, at `nice -n 19`. `~/.local/share/narrative/lintenv/bin/python
+   tests/run_rewrap.py` reports 0 cases wrong.
 
 6. **Records and copies**: `python3 verify_docs.py` reports 0 problems.
 

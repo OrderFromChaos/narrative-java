@@ -38,7 +38,8 @@ def main() -> int:
     args = parser.parse_args()
 
     venv = ['--venv', str(args.venv)] if args.venv else []
-    command = [sys.executable, str(VERIFY_PATH), '--gradle', args.gradle, *venv, 'fixtures']
+    # with --no-fix there is no re-wrap, and the NAR125 fixtures stay ragged
+    command = [sys.executable, str(VERIFY_PATH), '--gradle', args.gradle, *venv, '--no-fix', 'fixtures']
     result = subprocess.run(command, cwd=TESTS_DIR, capture_output=True, text=True, check=False)
     if result.returncode not in {EXIT_SUCCESS, EXIT_MISMATCH}:
         print(result.stdout + result.stderr)

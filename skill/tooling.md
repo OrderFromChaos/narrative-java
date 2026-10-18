@@ -26,7 +26,7 @@ exits 1 when a copy differs from its source.
 | javac `-Xlint:rawtypes,unchecked` | raw types and unchecked operations (`NAR121`) |
 | Checkstyle | naming (`NAR130`) and the parameter limit (`NAR131`), with `checkstyle.xml` |
 | PMD | the structural checks, as XPath rules in `pmd-ruleset.xml`, plus four built-in rules |
-| `javachecks.py` | comments and javadoc with a lexer, the prose checks, the checks on comments (`NAR118` to `NAR120`, `NAR125`), the comment and javadoc lookups of `NAR110`, `NAR116` and `NAR117`, then noqa and `--since` over every finding |
+| `javachecks.py` | comments and javadoc with a lexer, the prose checks, the checks on comments (`NAR118` to `NAR120`, `NAR125`), the comment and javadoc lookups of `NAR110`, `NAR116` and `NAR117`, then noqa and `--since` over every finding. With `--rewrap`, `javachecks.py` re-wraps comments in place instead. `verify.py` runs the re-wrap before Gradle unless `--no-fix` is given |
 | `checks.py`, `agentverbs.py`, `prose.py` | the prose checks of narrative-python, unchanged: `NAR012` to `NAR018`, `NAR020` and `NAR021` |
 | `narrative.init.gradle` | the Checkstyle and PMD tasks and the javac flags, added to the build with no project file change |
 | `verify.py` | the gate, one Gradle run, then `javachecks.py`, with the toolchain guards |
@@ -67,7 +67,7 @@ A Markdown, HTML or plain text file named to `verify.py` gets the prose checks o
 | `NAR122` | a type with more than 4 names below the outermost one (NAR005) | PMD |
 | `NAR123` | `&&` inside `\|\|` without parentheses (R2b-B4) | PMD |
 | `NAR124` | a package-private member in main sources (J1-A02) | PMD |
-| `NAR125` | a javadoc line with room for the first word of the next line (J1-F02) | `javachecks.py` |
+| `NAR125` | a javadoc line with room for the first word of the next line (J1-F02). `javachecks.py --rewrap` re-wraps the paragraph (J1-F08) | `javachecks.py` |
 | `NAR130` | a name outside the Java convention (J1-P01) | Checkstyle |
 | `NAR131` | more than 3 parameters (J1-P03) | Checkstyle |
 | `NAR140` | a concrete collection type in a signature, a field or a local, except `EnumMap` and `EnumSet` (J1-P11, J1-F03) | PMD LooseCoupling, `allowedTypes` |

@@ -81,8 +81,9 @@ come from Maven Central on the first run.
   schema of narrative-python. [`benchmark/proposals_java_mapping.md`](benchmark/proposals_java_mapping.md):
   each Python rule and its Java form. [`benchmark/spikes.md`](benchmark/spikes.md): the toolchain
   tests, and the end-to-end runs on PlanNH.
-- [`tests/`](tests/): for each code, a fixture that breaks the rule and one that does not, 79 files, checked by
-  `python3 tests/run_fixtures.py --gradle <gradle>`.
+- [`tests/`](tests/): for each code, a fixture that breaks the rule and one that does not, 86 files,
+  checked by `python3 tests/run_fixtures.py --gradle <gradle>`. The cases of `javachecks.py --rewrap`
+  are in `tests/rewrap/`, checked by `tests/run_rewrap.py` with the interpreter of the lint venv.
 - The prose checks are copies of the files of narrative-python. `python3 sync_prose.py` updates them,
   and `python3 verify_docs.py` fails when a copy differs.
 
