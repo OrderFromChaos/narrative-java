@@ -787,6 +787,7 @@ R10-depth-example, R10-period-join)
 - the general case: `records are separated by blank lines`, not `two records` (R10-Q40)
 - a worked example matches what the code does for every case in it (R10-worked-example)
 - no semicolon and no dash. Write two sentences (R10-no-semicolon, `NAR013`)
+- a comment line over the line limit is wrapped onto the next line. Never change the wording to fit (R11-wrap-not-reword)
 - a Fence is the fact the code depends on, then the step the code takes because of that fact:
   `// Character.isDigit() accepts non-ASCII digits such as '٣'. Check the range '0' to '9' too`.
   Write `X would` only when X is an alternative the code does not use. When the code under the
@@ -813,10 +814,23 @@ or, with an object, a deliberate act (`the default config sends the job to a que
 figure or example on the page can show what is in it. The check parses each sentence, and some noun
 compounds and participles are flagged by mistake. (R10-agentverb-check, R10-agentverb-agency)
 
-**Silence a false positive with `// noqa: NARxxx`** in the comment block, or after the code on its
-line. The noqa covers every line of its comment block, and the code line after a whole-line block,
-because spotless wraps a `//` comment over 120 columns and moves a trailing noqa to the next line.
-The same syntax silences a finding from any tool. (J1-P35)
+**A finding is information.** Read the sentence again, then rewrite or delete the sentence, except
+in three cases:
+
+1. **A misparse.** The flagged words are not the subject and verb, or not one clause, in what you
+   wrote. Leave the sentence.
+2. **A quoted example.** The flagged text is an example of the fault, such as a banned word in the
+   rule that bans the word. Leave the sentence.
+3. **The code's name for the thing.** The flagged words come from an identifier, such as `sees the
+   sky` from `canBlockSeeTheSky()`. Leave the sentence, and list the sentence in your report.
+
+**Never add a `noqa` yourself.** The exceptions are the three `noqa` uses prescribed in this skill:
+`NAR104` for two types of one name, `NAR142` in a degrade-and-report loop, and `NAR130` once the
+user approves an upstream name. (R11-findings)
+
+A `// noqa: NARxxx` covers every line of its comment block, and the code line after a whole-line
+block, because spotless wraps a `//` comment over 120 columns and moves a trailing noqa to the next
+line. The same syntax silences a finding from any tool. (J1-P35)
 
 ## Procedures
 
@@ -919,6 +933,9 @@ R11-literal-review)
    on every path.
 4. Test the sentence against **Sentence form**, and the comment against the restatement gate.
 
+An entry on a review list is a question, not a finding. When the subject can do the verb in the
+domain's sense, such as a block that gets sky light, leave the sentence as it is. (R11-review-question)
+
 Fix what fails and run `verify.py` again.
 
 ### Published prose
@@ -932,4 +949,4 @@ each page to `verify.py`, which then runs the prose checks only, with no Gradle 
 python3 "${CLAUDE_SKILL_DIR}/verify.py" README.md docs/report.html
 ```
 
-Silence a false positive with `<!-- noqa: NAR017 -->` on its line. (R10-published-prose)
+Handle each finding by the rule **A finding is information**. (R10-published-prose)
