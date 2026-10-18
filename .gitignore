@@ -4,3 +4,4 @@ __pycache__/
 .lintenv/
 tests/build/
 tests/.gradle/
+skill/PROSE_SOURCE

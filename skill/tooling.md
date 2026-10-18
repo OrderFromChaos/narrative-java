@@ -14,9 +14,8 @@ Use **uv** for the lint venv. `requirements-lock.txt` is a copy of the narrative
 byte, so both skills run in one venv. (R10-uv)
 
 `checks.py`, `agentverbs.py`, `prose.py`, `words.json` and `requirements-lock.txt` are copies of the
-files of narrative-python. `PROSE_SOURCE` has the checkout and commit they came from. Change them in
-narrative-python, then run `sync_prose.py` in the narrative-java repository. `sync_prose.py --check`
-exits 1 when a copy differs from its source.
+files of narrative-python. Change them in narrative-python, then run `sync_prose.py` in the
+narrative-java repository. `sync_prose.py --check` exits 1 when a copy differs from its source.
 
 ## The split
 

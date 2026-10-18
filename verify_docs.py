@@ -4,8 +4,8 @@
   `j1`.
 - Every decision id cited in a Markdown file resolves: a `J1-` id in benchmark/decisions.jsonl here,
   every other id in benchmark/decisions.jsonl of the narrative-python checkout named in
-  skill/PROSE_SOURCE. A doc that states the current rules (skill/ and README.md) cites no superseded
-  id.
+  skill/PROSE_SOURCE, else ../improved-ai-code-style. A doc that states the current rules (skill/
+  and README.md) cites no superseded id.
 - Every NAR code named in a Markdown file is a code of checks.py, agentverbs.py, javachecks.py or
   pmd-ruleset.xml.
 - The five files that sync_prose.py copies are the same, byte for byte, as their source.
@@ -16,7 +16,7 @@ Usage:
 Exit codes:
     0  no problem
     1  at least one problem
-    2  the narrative-python checkout of skill/PROSE_SOURCE is missing
+    2  the narrative-python checkout is missing
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent
 SKILL_DIR = REPO_DIR / 'skill'
+DEFAULT_SOURCE_DIR = REPO_DIR.parent / 'improved-ai-code-style'
 COPIED_FILES = ('checks.py', 'agentverbs.py', 'prose.py', 'words.json', 'requirements-lock.txt')
 DECISION_FIELDS = ('id', 'dimension', 'round', 'kind', 'options', 'choice', 'strength', 'condition', 'note', 'date')
 DECISION_ROUNDS = frozenset({'j1'})
@@ -100,11 +101,15 @@ def main() -> int:
 
 
 def readSourceDir() -> Path:
-    """Return the narrative-python checkout named on the path= line of skill/PROSE_SOURCE."""
-    for line in (SKILL_DIR / 'PROSE_SOURCE').read_text(encoding='utf-8').splitlines():
+    """Return the checkout named on the path= line of skill/PROSE_SOURCE, or DEFAULT_SOURCE_DIR."""
+    record_path = SKILL_DIR / 'PROSE_SOURCE'
+    if not record_path.is_file():
+        return DEFAULT_SOURCE_DIR
+
+    for line in record_path.read_text(encoding='utf-8').splitlines():
         if line.startswith('path='):
             return Path(line.removeprefix('path='))
-    return REPO_DIR.parent / 'improved-ai-code-style'
+    return DEFAULT_SOURCE_DIR
 
 
 def supersededIds(record: dict[str, object]) -> list[str]:

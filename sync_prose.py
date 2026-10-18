@@ -1,11 +1,9 @@
 """Copy the prose checker files of narrative-python into skill/, byte for byte.
 
 narrative-java runs the prose checks of narrative-python unchanged, so the five files in COPIED_FILES
-are copies. skill/PROSE_SOURCE has the path and the commit of the narrative-python checkout they came
-from:
-
-    path=/home/order/Dropbox/Python_Code/Utility/improved-ai-code-style
-    commit=b068cda
+are copies. Each copy writes skill/PROSE_SOURCE, with a path= line and a commit= line for the
+narrative-python checkout they came from. The file is local, and git ignores it. Without it, the
+checkout is ../improved-ai-code-style.
 
 With --check, nothing is copied, and a copy that differs from its source is an error.
 
