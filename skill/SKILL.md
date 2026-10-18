@@ -83,6 +83,11 @@ public final class PlanFiles {
 - Layout is a spotless setting. Lines are broken at 120 columns by the GTNH Eclipse formatter, with
   each call of a chain after the first on a separate line. Do not fight it. (J1-D01)
 
+- **After you edit a comment paragraph, re-wrap the whole paragraph yourself.** Spotless splits a
+  comment line over 120 columns but never joins short lines. So after an edit, the line breaks of the
+  first draft remain: `The product is` / `a` / `float, …`. `NAR125` flags a javadoc line with room for
+  the first word of the next line. (J1-F02)
+
 - Separate logically self-contained blocks inside a method with **one blank line**. That is its only
   meaning here. Short guards written as a group stay grouped. (R3a-01)
 
@@ -203,8 +208,9 @@ Name every magic number. (Q09) Then place it by this test:
 
 - **Annotate the true requirement.** A parameter has the narrowest interface the method uses:
   `Iterable`, `Collection`, `List`, `Map`. Never `ArrayList` or `HashMap` in a signature. `SortedMap`
-  where the order matters (see **GTNH**). `NAR140` flags a concrete collection in a signature.
-  (J1-P11, Q13)
+  where the order matters (see **GTNH**). `NAR140` flags a concrete collection type in a signature,
+  a field or a local. `EnumMap` and `EnumSet` keep their types: `new EnumMap<>(map)` and
+  `EnumSet.copyOf(set)` throw on an empty argument of another type. (J1-P11, Q13, J1-F03)
 
 - **Domain primitives.** A one-component record, `record ScanId(int value)`, at boundaries and in
   code that runs rarely, so a bare `int` is a type error. In per-frame code each wrapper is an
@@ -234,7 +240,9 @@ Name every magic number. (Q09) Then place it by this test:
 
 - **Composition over inheritance.** An `interface` for a seam with two real implementations. No
   `abstract class` in project code. `extends` only for a class the platform requires: Forge `Block`,
-  `Item` and `TileEntity`, MUI2 widgets, GT bases. `NAR106` flags an abstract class. (J1-P18, R2-01)
+  `Item` and `TileEntity`, MUI2 widgets, GT bases. A `sealed abstract class` is allowed when its
+  permitted subclasses share fields: the fields are declared once, in the class. `NAR106` flags every other
+  abstract class. (J1-P18, R2-01, J1-F05)
 
 - **Give a name to a type you cannot say out loud.** Could you refer to this type in a normal
   discussion with another programmer? `Map<String, List<Pair<Float, Float>>>` has five names below
@@ -325,9 +333,24 @@ flags a `default` arm in a switch over an enum or a sealed type of the project.
   `PlanFailure`. Never `Error`, because a `java.lang.Error` subclass means the JVM is unusable.
   `NAR109` enforces both. (J1-P23)
 
-- **Handle each failure mode narrowly and separately.** No `catch (Exception)`, `catch (Throwable)`
-  or `catch (Error)`. `NAR142` flags them. The exception is `catch (NoClassDefFoundError)` at the
-  optional-mod boundary, described in `architecture.md`. (J1-P24, Q19)
+- **Handle each failure mode narrowly and separately.** No `catch (Exception)`,
+  `catch (RuntimeException)`, `catch (NullPointerException)`, `catch (Throwable)` or `catch (Error)`.
+  `NAR142` flags them. There are two exceptions. One is `catch (NoClassDefFoundError)` at the
+  optional-mod boundary, described in `architecture.md`. The other is `catch (RuntimeException)` in
+  a degrade-and-report loop over code from another mod, whose exceptions you cannot list. Mark the
+  catch `// noqa: NAR142`, with the reason:
+
+  ```java
+  for (MTEMultiBlockBase machine : machines) {
+      try {
+          checkConformance(machine);
+      } catch (RuntimeException exception) { // noqa: NAR142, degrade and report over GT machine code
+          failures.add(machine.getLocalName() + ": " + exception);
+      }
+  }
+  ```
+
+  (J1-P24, Q19, J1-F04)
 
 - **Related means the handling is the same, not that the classes share a base.** Where two failures
   produce one outcome, one multi-catch `catch (A | B exception)` is correct. But check the premise
@@ -684,13 +707,18 @@ R10-depth-example, R10-period-join)
 
 **Sentence form:**
 - a one-line `//` comment has a lowercase start and no final period. Several lines, and every javadoc, are sentences. (R10-Q26, R10-Q35, R10-docstrings)
-- two sentences over a connective such as `which` or `since`. With a connective, the reader may
-  attach the second clause to the wrong noun. `// migrate before load, which reads the count tag`
-  → `// migrate before load. load() reads the count tag` (R10-period-join)
+- two sentences over a connective such as `which`, `since`, `as` or `, where`. With a connective,
+  the reader may attach the second clause to the wrong noun. `// migrate before load, which reads
+  the count tag` → `// migrate before load. load() reads the count tag`. A comparison with `as` to
+  other code states no fact: `The product is a float, as in the machines' code` → `The machines'
+  code computes this in double`, once you have checked the machines' code. `NAR021` flags `as in`,
+  a sentence that opens with `As` and has no verb, `as the X verbs it`, and `, where`
+  (R10-period-join, R11-connective-as-where)
 - terse. Drop articles where nothing is lost, never the subject or the verb (R10-seed-10, R10-terse-narrow)
 - every clause has a subject and a verb. A label for the thing is fine: `// least recently used
   first`. A predicate with its subject cut is not: `Bound to one machine` → `The setting is bound
-  to one machine`. `NAR020` flags the form before `, so`. (R10-subject-verb)
+  to one machine`. `NAR020` flags that form before `, so`, and a subordinate clause before `, so`:
+  `Whether some terms differ by mode, so…`. (R10-subject-verb, R11-nar020-subordinate)
 - every noun phrase refers to one real thing, at the moment the sentence is about. Name the object in
   the program each noun phrase refers to, and rewrite when:
   - the thing does not exist yet, or does not have its property yet: `// newBufferedWriter() creates
@@ -821,11 +849,19 @@ some of these rules, and a finding on a line the diff does not touch is not the 
 lines that the diff against `merge-base(HEAD, base)` adds or changes are reported, and every line of
 an untracked file.
 
+**Ask the user before you name something by an upstream convention that `NAR130` rejects.** For
+example, GT5's `MultiblockTooltipBuilder` has about 40 `TT_*` fields, such as `TT_machineType`. A new
+`TT_parallels` field beside those fields breaks the Java naming convention. With approval, mark the field
+`// noqa: NAR130`. (J1-F06)
+
 `verify.py` runs one Gradle invocation with the init script `narrative.init.gradle`: `spotlessApply`
 (or `spotlessCheck` with `--no-fix`), `compileJava` with the raw-type and unchecked warnings of javac,
 then Checkstyle and PMD with the configs beside it. `javachecks.py` then reads the comments, runs the
-prose checks, and merges the three reports into one list with NAR codes. A passing run ends with a
-list of every comment and javadoc summary, the input to **Prose review**.
+prose checks, and merges the three reports into one list with NAR codes. A passing run ends with
+three lists, the input to **Prose review**: every comment and javadoc summary, every subject that
+cannot act with its verb, and every sentence with a pronoun. With `--since`, the lists cover only
+the changed lines, and they are printed after the findings too, because upstream lines in a diff
+often still have findings. (J1-F01)
 
 | exit | meaning |
 |---|---|
@@ -841,11 +877,16 @@ that break rules of this skill are in `tooling.md`. Read it before you change a 
 **After a passing `verify.py` run, read the lists it prints, plus every error message, lang entry
 and help text.** The first list has every comment and javadoc summary. The second has each subject
 that cannot act, paired with its verb, for every verb that is neither a `NAR017` finding nor an
-operation of code. Take these steps for each sentence. (R10-prose-inventory, R10-closing-review)
+operation of code. A verb such as `reads` or `runs` is an operation of code only with a direct
+object and code as its subject: `PlanLoader reads the plan file`, not `the spec reads`. The third
+has every sentence with `it`, `its` or a standalone `that`, each after the sentence before. Take
+these steps for each sentence. (R10-prose-inventory, R10-closing-review, R11-pronoun-list,
+R11-literal-review)
 
 1. Name the subject and the verb. Can that subject perform that verb?
 2. For each noun phrase, name the variable, method, file or value it refers to. If none fits, or
-   two do, rewrite.
+   two do, rewrite. For each pronoun in the third list, name the noun the pronoun stands for. If
+   that noun is in another sentence, or two nouns fit, repeat the noun (R10-stand-in).
 3. List the code paths that reach the line: each branch, each caller, each failure. Check the claim
    on every path.
 4. Test the sentence against **Sentence form**, and the comment against the restatement gate.

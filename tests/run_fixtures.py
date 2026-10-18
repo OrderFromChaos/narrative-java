@@ -64,7 +64,7 @@ def readReportedCodes(verify_output: str) -> dict[str, set[str]]:
     """Collect the codes of each file from the finding lines of verify.py.
 
     Returns:
-        The codes by file path, relative to the fixture project, as verify.py prints it.
+        The codes by file path, relative to the fixture project. verify.py prints the paths in that form.
     """
     # matches:
     # `fixtures/NAR101/Flagged.java:6: NAR101 method above its first caller in this class`

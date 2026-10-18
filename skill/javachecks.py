@@ -3,7 +3,7 @@
 Comments and javadoc are read with a lexer, not a parser, so the comments of a file are read even
 when the file uses syntax newer than a Java grammar. The prose checks are the ones of narrative-python, unchanged:
 the wording checks of checks.py (NAR012 to NAR016, NAR018) and the agent-verb checks of agentverbs.py
-(NAR017, NAR020). The structural checks are PMD XPath rules in pmd-ruleset.xml. Every tool
+(NAR017, NAR020, NAR021). The structural checks are PMD XPath rules in pmd-ruleset.xml. Every tool
 finding is mapped to a NAR code here.
 
 Usage:
@@ -39,6 +39,7 @@ import argparse
 import bisect
 import hashlib
 import importlib.metadata
+import itertools
 import json
 import re
 import subprocess
@@ -56,6 +57,8 @@ from prose import Passage
 
 WORDS_PATH = Path(__file__).resolve().parent / 'words.json'
 SKIPPED_DIRS = frozenset({'.git', '.gradle', 'build', 'run', 'out', 'bin'})
+# the comment line length of the GTNH Eclipse formatter, counted from the column where the comment starts
+JAVADOC_WIDTH = 120
 # a text block, a string or character literal, a // comment or a /* comment. The literals are matched
 # so that a // or /* inside one is not read as a comment
 # matches:
@@ -253,7 +256,8 @@ def rejectReport(report_path: Path, reason: str) -> ReportError:
 def readChangedLines(since: str, any_repo_path: Path) -> ChangedLines:
     """List the lines that the diff against merge-base(HEAD, since) adds or changes, per file.
 
-    For a pure deletion, the line after it counts as changed. Every line of an untracked file counts.
+    For a hunk that only deletes lines, the line below the deleted lines is listed, so a finding on that
+    line is reported under --since. Every line of an untracked file is listed.
 
     Raises:
         ReportError: git fails, or `since` names no commit.
@@ -298,9 +302,10 @@ def proseInventory(
     java_paths: list[Path],
     changed: ChangedLines | None,
 ) -> list[str]:
-    """List every comment and javadoc summary, then every review pair that is not a NAR017 finding."""
+    """List every comment and javadoc summary, every review pair that is not a NAR017 finding, and every pronoun."""
     summaries: list[str] = []
     pairs: list[str] = []
+    pronouns: list[str] = []
     for java_path in java_paths:
         reading = readComments(java_path.read_text(encoding='utf-8', errors='replace'))
         for passage in reading.passages:
@@ -309,12 +314,25 @@ def proseInventory(
                 pairs.extend(
                     f'{java_path}:{passage.lineOf(pair)}: {pair!r}' for pair in prose.reviewPairs(passage.text)
                 )
+                pronouns.extend(
+                    f'{java_path}:{sentenceLine(passage, sentence)}: {note}'
+                    for sentence, note in prose.pronounNotes(passage.text)
+                )
     return [
         '--- every comment and javadoc summary: read each against SKILL.md, Comments ---',
         *summaries,
         '--- every subject that cannot act, with its verb: can that subject perform that verb? ---',
         *(pairs or ['(none)']),
+        '--- every sentence with a pronoun, after the one before it: which noun does each pronoun stand for? ---',
+        *(pronouns or ['(none)']),
     ]
+
+
+def sentenceLine(passage: Passage, sentence: str) -> int:
+    """Find the line on which a sentence of a passage starts. `Passage.text` is the lines joined by single spaces."""
+    offset = max(passage.text.find(sentence), 0)
+    ends = list(itertools.accumulate(len(text) + 1 for text in passage.texts))
+    return passage.lines[min(bisect.bisect_right(ends, offset), len(passage.lines) - 1)]
 
 
 def checkFile(
@@ -341,8 +359,13 @@ def checkFile(
         finding = JavaFinding(java_path, wording.line, wording.code, wording.detail)
         candidates.append((finding, passage_lines.get(wording.line, frozenset({wording.line}))))
     for passage in passages:
-        agent_hits, fragment_heads = prose.passageHits(passage.text)
-        for code, hits in ((agentverbs.CODE, agent_hits), (agentverbs.FRAGMENT_CODE, fragment_heads)):
+        hits_of_passage = prose.passageHits(passage.text)
+        coded_hits = (
+            (agentverbs.CODE, hits_of_passage.verbs),
+            (agentverbs.FRAGMENT_CODE, hits_of_passage.heads),
+            (agentverbs.CONNECTIVE_CODE, hits_of_passage.connectives),
+        )
+        for code, hits in coded_hits:
             for hit in hits:
                 candidates.append(
                     (JavaFinding(java_path, passage.lineOf(hit), code, repr(hit)), frozenset(passage.lines)),
@@ -581,7 +604,7 @@ def noqaScopes(blocks: list[list[Comment]]) -> dict[int, frozenset[str]]:
 
 
 def commentFindings(java_path: Path, lines: list[str], reading: CommentReading) -> list[JavaFinding]:
-    """Run the checks on comments and source lines: type javadoc, FIXME and return contracts."""
+    """Run the checks on comments and source lines: type javadoc, FIXME, return contracts and ragged javadoc."""
     # matches:
     # `public final class PlanReader {`
     # `sealed interface Settlement permits Solved, Stalled {`
@@ -630,7 +653,69 @@ def commentFindings(java_path: Path, lines: list[str], reading: CommentReading) 
         if first.kind is CommentKind.LINE and RETURN_CONTRACT.match(opening) and METHOD_OPENING.search(previous_code):
             detail = 'return contract in a comment at the top of a method. Put it in the javadoc, or cut it'
             findings.append(JavaFinding(java_path, first.first_line, 'NAR120', detail))
+
+    for comment in reading.comments:
+        if comment.kind is CommentKind.JAVADOC and not comment.trailing:
+            findings.extend(raggedLines(java_path, lines, comment))
     return findings
+
+
+def raggedLines(java_path: Path, lines: list[str], comment: Comment) -> list[JavaFinding]:
+    """Flag each javadoc line that has room for the first word of the next line in the same paragraph.
+
+    Spotless splits a comment line over 120 columns but never joins short lines. So after an edit, the
+    line breaks of the first draft remain: `The product is` / `a` / `float, ...`. The room is measured
+    against the widest line of the paragraph, at most 120 columns from the column of `/**`, so a
+    paragraph wrapped by hand at 100 columns passes. Two kinds of line are not flagged: a line that ends
+    a sentence, and a line followed by a line that opens with the same word (`page 2: …` / `page 8: …`).
+    """
+    # an inline tag such as `{@link Plan#read}` cannot be split, so NEXT_WORD matches the whole tag
+    NEXT_WORD = re.compile(r'\{@[^}]*\}\S*|\S+')
+    findings: list[JavaFinding] = []
+    for paragraph in javadocParagraphs(lines, comment):
+        widths = {number: len(lines[number - 1].rstrip()) - comment.column for number, _text in paragraph}
+        limit = min(max(widths.values()), JAVADOC_WIDTH)
+        for (number, text), (_next_number, next_text) in itertools.pairwise(paragraph):
+            if text.endswith(('.', '!', '?', ':', '>')) or text.split()[0] == next_text.split()[0]:
+                continue
+            word = NEXT_WORD.match(next_text)
+            if word is not None and widths[number] + 1 + len(word[0]) <= limit:
+                detail = (
+                    f'javadoc line ends at column {widths[number]}, and {word[0]!r} from the next line fits in the'
+                    f' paragraph width of {limit}. Re-wrap the paragraph'
+                )
+                findings.append(JavaFinding(java_path, number, 'NAR125', detail))
+    return findings
+
+
+def javadocParagraphs(lines: list[str], comment: Comment) -> list[list[tuple[int, str]]]:
+    """Split the lines of a javadoc into paragraphs, and strip the `*` margin from each line.
+
+    A blank line ends a paragraph, and a `<pre>` sample is left out. A line that opens with a block
+    tag, an HTML tag or a list marker starts a paragraph.
+    """
+    # matches:
+    # `@param planPath where the plan file is`
+    # `<li>the first machine`
+    # `- one item`
+    # `2. the second step`
+    # rejects:
+    # `the plan file`
+    OPENS_PARAGRAPH = re.compile(r'^(?:@\w|<|[-*]\s|\d+[.:)]\s)')
+    paragraphs: list[list[tuple[int, str]]] = []
+    current: list[tuple[int, str]] = []
+    in_sample = False
+    for number, _raw in comment.texts:
+        text = cleanBlockLine(lines[number - 1].strip().removeprefix('/**').removesuffix('*/'))
+        in_sample = in_sample or '<pre>' in text
+        if in_sample or not text or OPENS_PARAGRAPH.match(text):
+            paragraphs.append(current)
+            current = [] if in_sample or not text else [(number, text)]
+            in_sample = in_sample and '</pre>' not in text
+            continue
+        current.append((number, text))
+    paragraphs.append(current)
+    return [paragraph for paragraph in paragraphs if len(paragraph) > 1]
 
 
 def lineAboveAnnotations(lines: list[str], declaration_line: int) -> int:
@@ -805,6 +890,15 @@ class JavaFinding:
         return f'{self.java_path}:{self.line}: {prefix}{self.code} {self.detail}'
 
 
+@dataclass(frozen=True)
+class PassageHits:
+    """The findings of agentverbs.py on one passage: NAR017 hits, NAR020 clause heads, NAR021 connectives."""
+
+    verbs: list[str]
+    heads: list[str]
+    connectives: list[str]
+
+
 class ProseReader:
     """The agent-verb checks of agentverbs.py, with the results of each passage text cached.
 
@@ -838,14 +932,15 @@ class ProseReader:
                 entries = stored['entries']
         return cls(cache_path, key, entries)
 
-    def passageHits(self, text: str) -> tuple[list[str], list[str]]:
-        """Return the NAR017 hits and the NAR020 clause heads of one passage text."""
+    def passageHits(self, text: str) -> PassageHits:
+        """Return the NAR017 hits, the NAR020 clause heads and the NAR021 connectives of one passage text."""
         entry = self.entries.setdefault(self.digest(text), {})
         if 'verbs' not in entry:
             entry['verbs'] = self.sentenceReader().agentVerbs(text)
             entry['heads'] = self.sentenceReader().fragments(text)
+            entry['connectives'] = self.sentenceReader().connectives(text, page=False)
             self.changed = True
-        return entry['verbs'], entry['heads']
+        return PassageHits(entry['verbs'], entry['heads'], entry['connectives'])
 
     def reviewPairs(self, text: str) -> list[str]:
         entry = self.entries.setdefault(self.digest(text), {})
@@ -853,6 +948,22 @@ class ProseReader:
             entry['pairs'] = self.sentenceReader().reviewPairs(text)
             self.changed = True
         return entry['pairs']
+
+    def pronounNotes(self, text: str) -> list[tuple[str, str]]:
+        """Return each sentence with a pronoun, paired with its entry in the pronoun list.
+
+        The caller adds the file and the line to each entry.
+        """
+        entry = self.entries.setdefault(self.digest(text), {})
+        if 'pronoun_sentences' not in entry:
+            listed = self.sentenceReader().pronounSentences(text)
+            entry['pronoun_sentences'] = [sentence for _, sentence, _ in listed]
+            entry['pronoun_notes'] = [
+                f'{pronouns}: {sentence!r}' + (f' after {previous!r}' if previous else '')
+                for pronouns, sentence, previous in listed
+            ]
+            self.changed = True
+        return list(zip(entry['pronoun_sentences'], entry['pronoun_notes'], strict=True))
 
     def sentenceReader(self) -> agentverbs.SentenceReader:
         if self.reader is None:
@@ -874,7 +985,8 @@ class ProseReader:
         return hashlib.sha1(text.encode('utf-8')).hexdigest()
 
 
-# the cached results of one passage text: 'verbs', 'heads' and 'pairs', each a list of hits
+# the cached results of one passage text: 'verbs', 'heads', 'connectives', 'pairs', 'pronoun_sentences' and
+# 'pronoun_notes', each a list of strings
 PassageResults = dict[str, list[str]]
 ToolFindings = dict[Path, list[ToolFinding]]
 ChangedLines = dict[Path, set[int]]

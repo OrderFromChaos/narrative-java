@@ -87,11 +87,11 @@
 
     <rule name="NAR106" language="java" class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
           message="abstract class. Use an interface, or extend only a class the platform requires">
-        <description>P18: composition over inheritance.</description>
+        <description>P18: composition over inheritance. A sealed abstract class is allowed: its permitted subclasses share its fields.</description>
         <priority>3</priority>
         <properties>
             <property name="xpath">
-                <value><![CDATA[//ClassDeclaration[@Abstract = true()][@RegularClass = true()]]]></value>
+                <value><![CDATA[//ClassDeclaration[@Abstract = true()][@RegularClass = true()][not(pmd-java:modifiers() = 'sealed')]]]></value>
             </property>
         </properties>
     </rule>
@@ -309,7 +309,13 @@
         </properties>
     </rule>
 
-    <rule ref="category/java/bestpractices.xml/LooseCoupling"/>
+    <!-- EnumMap(Map) and EnumSet.copyOf(Collection) throw on an empty argument of another type, so the
+         enum types are part of the contract -->
+    <rule ref="category/java/bestpractices.xml/LooseCoupling">
+        <properties>
+            <property name="allowedTypes" value="java.util.Properties,java.util.EnumMap,java.util.EnumSet"/>
+        </properties>
+    </rule>
     <rule ref="category/java/design.xml/ImmutableField"/>
     <rule ref="category/java/errorprone.xml/AvoidCatchingGenericException"/>
     <rule ref="category/java/bestpractices.xml/PreserveStackTrace"/>

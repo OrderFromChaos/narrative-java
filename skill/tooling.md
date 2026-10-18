@@ -26,8 +26,8 @@ exits 1 when a copy differs from its source.
 | javac `-Xlint:rawtypes,unchecked` | raw types and unchecked operations (`NAR121`) |
 | Checkstyle | naming (`NAR130`) and the parameter limit (`NAR131`), with `checkstyle.xml` |
 | PMD | the structural checks, as XPath rules in `pmd-ruleset.xml`, plus four built-in rules |
-| `javachecks.py` | comments and javadoc with a lexer, the prose checks, the checks on comments (`NAR118` to `NAR120`), the comment and javadoc lookups of `NAR110`, `NAR116` and `NAR117`, then noqa and `--since` over every finding |
-| `checks.py`, `agentverbs.py`, `prose.py` | the prose checks of narrative-python, unchanged: `NAR012` to `NAR018` and `NAR020` |
+| `javachecks.py` | comments and javadoc with a lexer, the prose checks, the checks on comments (`NAR118` to `NAR120`, `NAR125`), the comment and javadoc lookups of `NAR110`, `NAR116` and `NAR117`, then noqa and `--since` over every finding |
+| `checks.py`, `agentverbs.py`, `prose.py` | the prose checks of narrative-python, unchanged: `NAR012` to `NAR018`, `NAR020` and `NAR021` |
 | `narrative.init.gradle` | the Checkstyle and PMD tasks and the javac flags, added to the build with no project file change |
 | `verify.py` | the gate, one Gradle run, then `javachecks.py`, with the toolchain guards |
 
@@ -42,13 +42,13 @@ A Markdown, HTML or plain text file named to `verify.py` gets the prose checks o
 | Code | Rule | Check |
 |---|---|---|
 | `NAR012` to `NAR016`, `NAR018` | wording in comments and javadoc | `checks.py` |
-| `NAR017`, `NAR020` | an agent verb on a subject that cannot act, a clause with no subject before `, so` | `agentverbs.py` |
+| `NAR017`, `NAR020`, `NAR021` | an agent verb on a subject that cannot act, a clause with no subject before `, so`, a clause joined by `as` or `, where` | `agentverbs.py` |
 | `NAR101` | a method above its first caller in the class (J1-P02) | PMD |
 | `NAR102` | two or more `null` arguments (J1-P03) | PMD |
 | `NAR103` | a stream inside a stream lambda (J1-P06) | PMD |
 | `NAR104` | a fully-qualified name outside the imports (J1-P08) | PMD |
 | `NAR105` | `ordinal()` in NBT, packet or Gson code (J1-P17) | PMD |
-| `NAR106` | an abstract class (J1-P18) | PMD |
+| `NAR106` | an abstract class that is not sealed (J1-P18, J1-F05) | PMD |
 | `NAR107` | a `default` arm in a switch over an enum or a sealed type of the project (J1-P19) | PMD |
 | `NAR108` | an array component in a record (J1-P22) | PMD |
 | `NAR109` | an exception class whose name does not end in `Exception`, or any `Error` subclass (J1-P23) | PMD |
@@ -67,11 +67,12 @@ A Markdown, HTML or plain text file named to `verify.py` gets the prose checks o
 | `NAR122` | a type with more than 4 names below the outermost one (NAR005) | PMD |
 | `NAR123` | `&&` inside `\|\|` without parentheses (R2b-B4) | PMD |
 | `NAR124` | a package-private member in main sources (J1-A02) | PMD |
+| `NAR125` | a javadoc line with room for the first word of the next line (J1-F02) | `javachecks.py` |
 | `NAR130` | a name outside the Java convention (J1-P01) | Checkstyle |
 | `NAR131` | more than 3 parameters (J1-P03) | Checkstyle |
-| `NAR140` | a concrete collection in a signature (J1-P11) | PMD LooseCoupling |
+| `NAR140` | a concrete collection type in a signature, a field or a local, except `EnumMap` and `EnumSet` (J1-P11, J1-F03) | PMD LooseCoupling, `allowedTypes` |
 | `NAR141` | a field that could be `final` (J1-P21) | PMD ImmutableField |
-| `NAR142` | a catch of `Exception`, `RuntimeException`, `NullPointerException`, `Throwable` or `Error` (J1-P24) | PMD AvoidCatchingGenericException |
+| `NAR142` | a catch of `Exception`, `RuntimeException`, `NullPointerException`, `Throwable` or `Error` (J1-P24, J1-F04) | PMD AvoidCatchingGenericException |
 | `NAR144` | a rethrow that drops the cause (Q21) | PMD PreserveStackTrace |
 
 A PMD rule or a Checkstyle check with no entry in `PMD_CODES` or `CHECKSTYLE_CODES` of

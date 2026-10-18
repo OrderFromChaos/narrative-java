@@ -135,12 +135,18 @@ def main() -> int:
         [str(venv_python), str(SKILL_DIR / 'javachecks.py'), *targets, *report_arguments, *since],
         check=False,
     )
-    if checked.returncode != EXIT_SUCCESS:
+    # in a PR, the upstream lines in a diff usually still have findings. So with --since, the lists are
+    # printed after the findings too. They cover only the changed lines
+    with_lists = checked.returncode == EXIT_SUCCESS or (checked.returncode == EXIT_FINDINGS and args.since)
+    if not with_lists:
         return checked.returncode
 
-    print('A pass is no evidence about the rules that no check implements. Read the lists below.', flush=True)
+    if checked.returncode == EXIT_SUCCESS:
+        print('A pass is no evidence about the rules that no check implements. Read the lists below.', flush=True)
+    else:
+        print('Fix the findings above, then read the lists below.', flush=True)
     subprocess.run([str(venv_python), str(SKILL_DIR / 'javachecks.py'), *targets, *since, '--prose'], check=False)
-    return EXIT_SUCCESS
+    return checked.returncode
 
 
 def readInstalledVersion() -> str:

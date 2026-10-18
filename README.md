@@ -77,8 +77,8 @@ come from Maven Central on the first run.
 - [`skill/SKILL.md`](skill/SKILL.md): the rules. [`skill/architecture.md`](skill/architecture.md):
   packages and other mods. [`skill/tooling.md`](skill/tooling.md): the job of each tool, every NAR
   code, and the tool defaults that break a rule.
-- [`benchmark/decisions.jsonl`](benchmark/decisions.jsonl): one record per Java decision, as in
-  narrative-python. [`benchmark/proposals_java_mapping.md`](benchmark/proposals_java_mapping.md):
+- [`benchmark/decisions.jsonl`](benchmark/decisions.jsonl): one record per Java decision, in the
+  schema of narrative-python. [`benchmark/proposals_java_mapping.md`](benchmark/proposals_java_mapping.md):
   each Python rule and its Java form. [`benchmark/spikes.md`](benchmark/spikes.md): the toolchain
   tests, and the end-to-end runs on PlanNH.
 - [`tests/`](tests/): for each code, a fixture that breaks the rule and one that does not, 79 files, checked by

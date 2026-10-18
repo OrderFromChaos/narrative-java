@@ -150,8 +150,8 @@ def schemaProblems(decisions: list[dict[str, object]]) -> list[str]:
 def readRuleCodes() -> set[str]:
     """Collect every NAR code of the checks of narrative-java, and the codes retired in checks.py.
 
-    The codes are the RULES and RETIRED keys of checks.py, the CODE and FRAGMENT_CODE constants of
-    agentverbs.py, and every NAR code in the text of javachecks.py and pmd-ruleset.xml.
+    The codes are the RULES and RETIRED keys of checks.py, the CODE, FRAGMENT_CODE and CONNECTIVE_CODE
+    constants of agentverbs.py, and every NAR code in the text of javachecks.py and pmd-ruleset.xml.
     """
     codes: set[str] = set()
     for node in ast.parse((SKILL_DIR / 'checks.py').read_text(encoding='utf-8')).body:
@@ -161,7 +161,8 @@ def readRuleCodes() -> set[str]:
                 key.value for key in node.value.keys if isinstance(key, ast.Constant) and isinstance(key.value, str)
             )
     for node in ast.parse((SKILL_DIR / 'agentverbs.py').read_text(encoding='utf-8')).body:
-        constant = isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', '') in {'CODE', 'FRAGMENT_CODE'}
+        names = {'CODE', 'FRAGMENT_CODE', 'CONNECTIVE_CODE'}
+        constant = isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', '') in names
         if constant and isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
             codes.add(str(node.value.value))
     for name in ('javachecks.py', 'pmd-ruleset.xml'):
