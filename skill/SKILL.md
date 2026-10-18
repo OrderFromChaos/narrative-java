@@ -657,6 +657,29 @@ Before writing or rewording a comment, follow **Writing a comment** under **Proc
 **When shortening an existing comment, rewrite the sentence. Do not delete words from it until it
 fits.** (R10-cleanup-rewrite)
 
+**When you replace an existing comment, rewrite it from the code.** (R11-rewrite-from-code)
+
+1. List the facts in the existing comment.
+2. Check each fact against its source where you can: the code for a fact about the code, and vanilla
+   Minecraft, a spec or a vendor's documentation for a fact from outside the code. Some facts have
+   no source you can check, such as a business decision. Keep those.
+3. Drop a fact only when you find it false.
+4. Write a new comment from the facts you kept, by the steps of **Writing a comment**.
+
+Reordering or trimming the existing comment's sentences is not a rewrite. The existing comment's
+terms, framing and sentence order are not reference material.
+
+**Every term passes one of two tests:**
+
+1. **The domain's word:** the word a practitioner of the domain uses for the thing. In a mod, the
+   word a player or modder uses: a cave, sky light, a block column.
+2. **An identifier, in backticks:** the name in the code that the reader can jump to, used as a
+   pointer, such as `ExtendedBlockStorage` or `canBlockSeeTheSky()`. A pointer to a badly named
+   identifier is still a pointer. Don't use the identifier as an English word.
+
+A term that passes neither test gets a plainer word or a definition at its first use.
+(R11-rewrite-from-code)
+
 **In a PR to another project, leave the comments that exist on its base branch as they are**, even
 the ones the diff moves. `verify.py --since` reports only the lines the diff adds or changes.
 
