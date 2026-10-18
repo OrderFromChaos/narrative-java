@@ -14,6 +14,12 @@
 // The tasks are registered in projectsEvaluated. GTNHGradle configures the checkstyle extension
 // after an allprojects block runs, so this script changes no extension and adds tasks of its own.
 
+// Gradle also runs an init script for buildSrc, and passes buildSrc none of the -P properties. The
+// script skips buildSrc and every other nested build.
+if (gradle.parent != null) {
+    return
+}
+
 def properties = gradle.startParameter.projectProperties
 def skillDir = new File(properties['narrative.skillDir'] ?: { throw new GradleException('narrative.init.gradle: pass -Pnarrative.skillDir') }())
 def reportDir = new File(properties['narrative.reportDir'] ?: 'build/narrative')
