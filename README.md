@@ -49,8 +49,8 @@ In Claude Code:
 ```
 
 Then open `/plugin`, go to **Marketplaces**, select `narrative-java` and select **Enable
-auto-update**. Invoke the skill as `/narrative-java:narrative-java`, or let Claude load it when a
-task involves Java for a GTNH mod.
+auto-update**. Invoke the skill as `/narrative-java:narrative-java`, or let Claude load the skill
+when a task involves Java for a GTNH mod.
 
 ### By hand
 
@@ -62,7 +62,8 @@ cd narrative-java
 ```
 
 `install.sh` copies the 14 files of the skill to `~/.claude/skills/narrative-java`, or to a path you
-give it. Invoke the skill as `/narrative-java`. **To update, run `git pull && ./install.sh`.**
+give `install.sh`. Invoke the skill as `/narrative-java`. **To update, run
+`git pull && ./install.sh`.**
 
 ### The lint venv
 
@@ -79,9 +80,9 @@ come from Maven Central on the first run.
   code, and the tool defaults that break a rule.
 - [`benchmark/decisions.jsonl`](benchmark/decisions.jsonl): one record per Java decision, in the
   schema of narrative-python. [`benchmark/proposals_java_mapping.md`](benchmark/proposals_java_mapping.md):
-  each Python rule and its Java form. [`benchmark/spikes.md`](benchmark/spikes.md): the toolchain
-  tests, and the end-to-end runs on PlanNH.
-- [`tests/`](tests/): for each code, a fixture that breaks the rule and one that does not, 86 files,
+  each Python rule and the rule's Java form. [`benchmark/spikes.md`](benchmark/spikes.md): the
+  toolchain tests, and the end-to-end runs on PlanNH.
+- [`tests/`](tests/): for each code, a fixture that breaks the rule and one that does not, 88 files,
   checked by `python3 tests/run_fixtures.py --gradle <gradle>`. The cases of `javachecks.py --rewrap`
   are in `tests/rewrap/`, checked by `tests/run_rewrap.py` with the interpreter of the lint venv.
 - The prose checks are copies of the files of narrative-python. `python3 sync_prose.py` updates them,

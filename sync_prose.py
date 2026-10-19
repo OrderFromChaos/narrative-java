@@ -5,7 +5,7 @@ are copies. Each copy writes skill/PROSE_SOURCE, with a path= line and a commit=
 narrative-python checkout they came from. The file is local, and git ignores it. Without it, the
 checkout is ../narrative-python.
 
-With --check, nothing is copied, and a copy that differs from its source is an error.
+With --check, nothing is copied, and a copy that differs from the narrative-python file is an error.
 
 Usage:
     $ python3 sync_prose.py
@@ -95,7 +95,7 @@ def listDifferingCopies(source_skill_dir: Path) -> list[str]:
 
 
 def readSourceCommit(source_dir: Path) -> str:
-    """Return the short commit of the checkout, with a suffix when its skill/ has uncommitted changes."""
+    """Return the short commit of the checkout, with a suffix when the checkout's skill/ has uncommitted changes."""
     head = subprocess.run(
         ['git', '-C', str(source_dir), 'rev-parse', '--short', 'HEAD'],
         capture_output=True,

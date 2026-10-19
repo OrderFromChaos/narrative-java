@@ -1,4 +1,4 @@
-"""Run javachecks.py --rewrap on each case file and compare the result with its expected file.
+"""Run javachecks.py --rewrap on each case file and compare the result with the expected file.
 
 For tests/rewrap/<Name>.java the expected result is tests/rewrap/<Name>.expected.java. The re-wrap
 runs on a copy in a temporary directory, twice. After the second run, the file must be the same as
@@ -29,7 +29,7 @@ EXIT_MISMATCH = 1
 
 
 def main() -> int:
-    """Re-wrap a copy of each case twice, then print each case whose result differs from its expected file."""
+    """Re-wrap a copy of each case twice, then print each case whose result differs from the expected file."""
     cases = sorted(path for path in (TESTS_DIR / 'rewrap').glob('*.java') if not path.name.endswith('.expected.java'))
     failures: list[str] = []
     with tempfile.TemporaryDirectory() as work_dir:

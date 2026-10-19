@@ -23,8 +23,10 @@ nothing.
    ```
 
    Known and accepted: in `SKILL.md`, the NAR014, NAR016 and NAR018 hits on the lines with the banned
-   words as examples, and the NAR017 misparses `value knowing` and `Comments thinking`, which narrative-python
-   has too. Take the steps of **Prose review** in `skill/SKILL.md` for each pair of the review list.
+   words as examples, the NAR017 misparses `value knowing` and `Comments thinking`, which narrative-python
+   has too, the NAR017 misparse `each flagged` (`re-wraps each flagged javadoc paragraph`), and the
+   NAR022 hit `its state` in the quoted Forge log message. In `README.md`, the NAR014 hit on the list
+   of findings. Take the steps of **Prose review** in `skill/SKILL.md` for each pair of the review list.
 
 3. **Java examples.** Write each fenced `java` block of `skill/*.md` to a `.java` file in the
    scratchpad, and run `javachecks.py` on them for the comment checks:

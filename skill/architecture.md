@@ -1,13 +1,13 @@
 # Narrative Java architecture
 
 `SKILL.md` applies to one file. This document applies to several, and to the boundary between a mod
-and the mods beside it in the pack.
+and the other mods in the pack.
 
 Read this when the change spans more than one package, or touches another mod. Do not read it for a
 change inside one class.
 
-The reason for each rule is in its text. The ids are provenance: a `J1-` id resolves in
-`benchmark/decisions.jsonl` of narrative-java, and every other id in the same file of
+The reason for each rule is in the text of the rule. The ids are provenance: a `J1-` id
+resolves in `benchmark/decisions.jsonl` of narrative-java, and every other id in the same file of
 narrative-python. A rule that no tool can check is marked as such.
 
 ## The measure
@@ -27,23 +27,24 @@ mod. It fails when the answer is "it depends" or "three places".
 
 1. a parameter threaded through methods that do not use it
 2. one more file
-3. one more named type. It costs nothing when the field belongs to the thing it is about
+3. one more named type. It costs nothing when the field belongs to the thing the field is about
 
 Spend a named type or a file to delete a threaded parameter. Never the reverse.
 
 ## Fact placement
 
-**Ask whose property the fact is, and put it in that thing's class.** (`R7-A05-property`)
+**Ask whose property the fact is, and put the fact in that thing's class.** (`R7-A05-property`)
 
-A per-machine overclock limit is a property of the machine, so it belongs with the machine and not
-in a generic overclock calculator. A retention window is a property of the data, not of the task
-that runs the cleanup.
+A per-machine overclock limit is a property of the machine, so the overclock limit belongs with the
+machine and not in a generic overclock calculator. A retention window is a property of the data, not
+of the task that runs the cleanup.
 
 - **Do not make a caller pass what the callee can compute from its arguments and imports.**
   (`R7-A01-revised`) **This outranks dependency direction.**
 
-- **An exception type belongs in the shared vocabulary, not in the class that throws it.**
-  (`R7-A04-revised`) It can be caught in any class, so it belongs to no one class.
+- **An exception type belongs in the shared vocabulary, not in the class that throws the
+  exception.** (`R7-A04-revised`) It can be caught in any class, so the exception type belongs to no
+  one class.
 
 - **A type centralises once it appears in a signature.** (`R7-B07`, `R7-B07-bound`) A shape built
   and consumed inside one method is a step, not a type. **Every type in a signature that other
@@ -67,7 +68,7 @@ that runs the cleanup.
   }
   ```
 
-  This is judgement, and no tool checks it.
+  This is judgement, and no tool checks this.
 
 **Two participants that must agree on a byte layout share one class.** (`R7-A05`) A packet is
 encoded and decoded in one `IMessage` class, `toBytes()` beside `fromBytes()`. A copy on each side is
@@ -78,10 +79,10 @@ the worst option, because drift between the copies is a bug that no type checker
 **There is no layer table and no directory rule. This is review judgement, not a check.**
 (`R7-A05-levels`)
 
-**A cycle between packages is a wrong cut.** (`R7-A02`, `J1-A01`) Break it with a shared vocabulary
-package. Classes inside one package may reference each other in both directions.
+**A cycle between packages is a wrong cut.** (`R7-A02`, `J1-A01`) Break the cycle with a shared
+vocabulary package. Classes inside one package may reference each other in both directions.
 
-**Call a static method through its class, and make its name clear without the class.**
+**Call a static method through its class, and make the method name clear without the class.**
 `PlanFiles.readAll()` reads well because `readAll` reads well without the qualifier. (`R7-B06`,
 `R9-03`, `J1-P07`)
 
@@ -92,7 +93,7 @@ package. Classes inside one package may reference each other in both directions.
 
 **The test is whether you can name it without saying "and".** (`R8-D12-resolved`) `PlanFiles` is plan
 files. A `PacketCodec` that also formats tooltips is "the wire format **and** tooltips", so the
-tooltips leave. If the only name for a group has an "and" in it, the group is two groups.
+tooltips leave. If the only name for a group has an "and", the group is two groups.
 
 **Split.** (`R7-B01`) Six classes of 40 to 90 lines are better than one of 340. Do not wait for a
 second user of the code.
@@ -102,20 +103,20 @@ everything. Cut by subject when it has several providers, several formats or sev
 on the axis the expected changes land in more cleanly.
 
 **Naming a concept and crossing a boundary are two tests, and they can disagree.** (`R7-B04`,
-`R8-D39`) Where they disagree, treat it as a question for review, not a rule.
+`R8-D39`) Where they disagree, treat the disagreement as a question for review, not a rule.
 
 **Shared code inside one subsystem starts in one package of that subsystem.** (`R7-A05-growth`)
 Never a project-wide `Utils` class.
 
 ## Package surface
 
-**`private` or `public` only, no package-private.** (`J1-A02`) A member that nothing outside its
-class uses is `private`. Test classes and test methods are exempt, because JUnit 5 convention is
-package-private, and PlanNH follows it. `NAR124` flags a package-private member in main sources.
+**`private` or `public` only, no package-private.** (`J1-A02`) A member that no other class uses is
+`private`. Test classes and test methods are exempt, because JUnit 5 convention is package-private,
+and PlanNH follows the convention. `NAR124` flags a package-private member in main sources.
 
-**The `@Mod` class is the entry point.** (`J1-A03`, `R7-A05-entry`) Its lifecycle handlers call the
-registration method of each subsystem and contain no other logic. For a new subsystem, the change is
-one new class and one new line in the handler.
+**The `@Mod` class is the entry point.** (`J1-A03`, `R7-A05-entry`) The lifecycle handlers of the
+`@Mod` class call the registration method of each subsystem and contain no other logic. For a new
+subsystem, the change is one new class and one new line in the handler.
 
 **`main()`-first generalises to a library class.** (`R7-E05`) The public entry takes the first
 position, callees follow in first-call order, nested types last.
@@ -123,31 +124,31 @@ position, callees follow in first-call order, nested types last.
 ## What earns a class, an interface, a record
 
 **Values that could differ between instances earn a class.** (`R7-C01-C02-revised`) Two plan files
-can be open at once, so a plan reader is a class. A packet format is the same everywhere, so its
-codec is a final class with static methods.
+can be open at once, so a plan reader is a class. A packet format is the same everywhere, so the
+format's codec is a final class with static methods.
 
 An `interface` is earned once a seam has more than one real implementation (`J1-P18`). A class is
 earned once two of it can exist at once. One object, one implementation, and a class is the right
 answer.
 
 **One coordinator, not a chain.** (`R7-C03`) Stages with no separate use do not each call the
-next. One method calls them in turn, with the intermediates in its local variables.
+next. One method calls them in turn, with the intermediates in the method's local variables.
 
-**A pure core earns its place by the number of decisions in it.** (`R7-C06`, `R7-C07`) Compute a
-plan, then apply it. In a mod, a pure core has one more benefit: with no Minecraft type in it, its
-tests run headless.
+**A pure core earns its place by the number of decisions in the core.** (`R7-C06`, `R7-C07`)
+Compute a plan, then apply the plan. In a mod, a pure core has one more benefit: with no Minecraft
+type in the core, the core's tests run headless.
 
 **Every case of a closed set is in one class, in an exhaustive `switch`.** (`R7-A06`, `J1-A07`)
 Adding a constant must be a compile error at the switch. Forge registries are framework registration
 and exempt.
 
-**Centralise a type before anything shares it. Do not generalise behaviour before you need it.**
-(`R7-B07-preemption`)
+**Centralise a type before anything shares the type. Do not generalise behaviour before you need
+it.** (`R7-B07-preemption`)
 
 ## Resources, state and config
 
-**A resource is opened at the scope whose lifetime it matches**, in try-with-resources, and the
-reader finds the open at the top of that scope. (`R7-A03`)
+**A resource is opened at the scope whose lifetime the resource matches**, in try-with-resources,
+and the reader finds the open at the top of that scope. (`R7-A03`)
 
 **Idle time is not the variable. What the handle costs on the far side is.** (`R7-A03-idle`)
 
@@ -159,10 +160,10 @@ connection is not.
 
 **Leaf classes read the constants they need.** (`R7-A07`) *No tool checks this.*
 
-**Pass a flag no further down than the method that branches on it.** (`R7-C04`)
+**Pass a flag no further down than the method that branches on the flag.** (`R7-C04`)
 
-**The clock goes inside the method that reads it.** (`R7-E04`) Test through the real clock and
-assert on ordering and bounds, not on an instant.
+**The clock goes inside the method that reads the clock.** (`R7-E04`) Test through the real clock
+and assert on ordering and bounds, not on an instant.
 
 ## Third-party code and other mods
 
@@ -175,7 +176,7 @@ pack: read them in the sources jars under `~/.gradle/caches/modules-2`.
 
 - Every reference to the optional mod is in one class, and the mod is `compileOnly`.
 - That class is called only behind a guard such as `Loader.isModLoaded("gregtech")`. The JVM loads a
-  class at its first use, so with the mod absent, the class is never loaded.
+  class at first use, so with the mod absent, the class is never loaded.
 - `NoClassDefFoundError` is caught at that boundary only. Everywhere else it is a bug.
 - Common code never references a client-only class (`@SideOnly(Side.CLIENT)`, the client proxy).
   A dedicated server crashes on it.
@@ -215,4 +216,4 @@ Config class. Developer-only bindings are last in the block.
 - **Whether a bundle is a real thing.** (`R7-C05-naming`)
 
 Two more are checkable in principle and **no checker for them exists**, so they are review
-judgement too: a cycle between packages, and a reference to an optional mod outside its class.
+judgement too: a cycle between packages, and a reference to an optional mod outside the mod's class.

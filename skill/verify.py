@@ -59,7 +59,7 @@ EXIT_NO_TOOLCHAIN = 2
 
 
 def main() -> int:
-    """Check the prerequisites, run Gradle with the init script, and run javachecks.py on its reports."""
+    """Check the prerequisites, run Gradle with the init script, and run javachecks.py on Gradle's reports."""
     parser = argparse.ArgumentParser(description='Run the narrative-java toolchain.')
     parser.add_argument('paths', nargs='*', type=Path, help='Java source dirs or files, or pages for the prose checks')
     parser.add_argument('--since', help='report only lines changed since merge-base(HEAD, SINCE)')
@@ -67,6 +67,7 @@ def main() -> int:
     parser.add_argument('--venv', type=Path, default=SHARED_VENV, help=f'the lint venv (default: {SHARED_VENV})')
     parser.add_argument('--gradle', help='the Gradle command, in place of ./gradlew')
     parser.add_argument('--max-workers', type=int, default=2, help='the Gradle worker limit (default: 2)')
+    parser.add_argument('--all-sentences', action='store_true', help='list every sentence, not the first 1000')
     args = parser.parse_args()
     print(f'narrative-java skill: {readInstalledVersion()}', flush=True)
 
@@ -152,7 +153,11 @@ def main() -> int:
         print('A pass is no evidence about the rules that no check implements. Read the lists below.', flush=True)
     else:
         print('Fix the findings above, then read the lists below.', flush=True)
-    subprocess.run([str(venv_python), str(SKILL_DIR / 'javachecks.py'), *targets, *since, '--prose'], check=False)
+    every = ['--all-sentences'] if args.all_sentences else []
+    subprocess.run(
+        [str(venv_python), str(SKILL_DIR / 'javachecks.py'), *targets, *since, '--prose', *every],
+        check=False,
+    )
     return checked.returncode
 
 
@@ -320,12 +325,12 @@ def runGradle(
     fix: bool,
     max_workers: int,
 ) -> GradleRun:
-    """Run spotless, compileJava and narrativeCheck in one Gradle invocation, and keep its output.
+    """Run spotless, compileJava and narrativeCheck in one Gradle invocation, and keep the invocation's output.
 
     The reports and caches of earlier runs stay, so a task whose inputs did not change is up to date.
     Incremental compilation is off in the init script, so compileJava compiles every file or none. Its
-    output is written to javac.log only in a run where it compiled. Under --since, Checkstyle and PMD
-    read only the files of changed-files.txt.
+    output is written to javac.log only in a run where compileJava compiled. Under --since, Checkstyle
+    and PMD read only the files of changed-files.txt.
     """
     report_dir.mkdir(parents=True, exist_ok=True)
     files_property: list[str] = []

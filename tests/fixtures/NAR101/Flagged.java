@@ -1,6 +1,6 @@
 package fixtures.nar101;
 
-/** Fixture for NAR101: a method above its first caller. */
+/** Fixture for NAR101: a method above the first caller of the method. */
 public final class Flagged {
 
     private static int base() {

@@ -15,7 +15,7 @@ byte, so both skills run in one venv. (R10-uv)
 
 `checks.py`, `agentverbs.py`, `prose.py`, `words.json` and `requirements-lock.txt` are copies of the
 files of narrative-python. Change them in narrative-python, then run `sync_prose.py` in the
-narrative-java repository. `sync_prose.py --check` exits 1 when a copy differs from its source.
+narrative-java repository. `sync_prose.py --check` exits 1 when a copy differs from the source.
 
 ## The split
 
@@ -26,22 +26,22 @@ narrative-java repository. `sync_prose.py --check` exits 1 when a copy differs f
 | Checkstyle | naming (`NAR130`) and the parameter limit (`NAR131`), with `checkstyle.xml` |
 | PMD | the structural checks, as XPath rules in `pmd-ruleset.xml`, plus four built-in rules |
 | `javachecks.py` | comments and javadoc with a lexer, the prose checks, the checks on comments (`NAR118` to `NAR120`, `NAR125`), the comment and javadoc lookups of `NAR110`, `NAR116` and `NAR117`, then noqa and `--since` over every finding. With `--rewrap`, `javachecks.py` re-wraps comments in place instead. `verify.py` runs the re-wrap before Gradle unless `--no-fix` is given |
-| `checks.py`, `agentverbs.py`, `prose.py` | the prose checks of narrative-python, unchanged: `NAR012` to `NAR018`, `NAR020` and `NAR021` |
+| `checks.py`, `agentverbs.py`, `prose.py` | the prose checks of narrative-python, unchanged: `NAR012` to `NAR018`, and `NAR020` to `NAR022` |
 | `narrative.init.gradle` | the Checkstyle and PMD tasks and the javac flags, added to the build with no project file change |
 | `verify.py` | the gate, one Gradle run, then `javachecks.py`, with the toolchain guards |
 
 Run order: spotless, then compileJava, then Checkstyle and PMD, then `javachecks.py`. `verify.py`
-runs them in that order, so use it rather than reproducing the sequence.
+runs them in that order, so use `verify.py` rather than reproducing the sequence.
 
 A Markdown, HTML or plain text file named to `verify.py` gets the prose checks only. In a page,
-`<!-- noqa: NAR017 -->` silences a code on its line.
+`<!-- noqa: NAR017 -->` silences a code on the same line.
 
 ## The codes
 
 | Code | Rule | Check |
 |---|---|---|
 | `NAR012` to `NAR016`, `NAR018` | wording in comments and javadoc | `checks.py` |
-| `NAR017`, `NAR020`, `NAR021` | an agent verb on a subject that cannot act, a clause with no subject before `, so`, a clause joined by `as` or `, where` | `agentverbs.py` |
+| `NAR017`, `NAR020`, `NAR021`, `NAR022` | an agent verb on a subject that cannot act, a clause with no subject before `, so`, a clause joined by `as` or `, where`, `it` or `its` after two or more singular nouns in one sentence | `agentverbs.py` |
 | `NAR101` | a method above its first caller in the class (J1-P02) | PMD |
 | `NAR102` | two or more `null` arguments (J1-P03) | PMD |
 | `NAR103` | a stream inside a stream lambda (J1-P06) | PMD |
@@ -95,21 +95,21 @@ Below is *why* each non-obvious setting is there.
   sealed type nested two levels deep is not tested.
 - **NAR110** has exemptions for `@Mod.Instance`, `@SidedProxy`, loggers, and the fields of a class that is
   annotated `@Config` or whose name ends in `Config` or `Configuration`.
-- A type-pattern switch over a type that is not sealed, such as an NEI handler object, needs its
-  `default` arm, and `NAR107` leaves it alone.
+- A type-pattern switch over a type that is not sealed, such as an NEI handler object, needs a
+  `default` arm, and `NAR107` leaves the switch alone.
 
 ## Caches
 
-Everything below is in `build/narrative/` of the project, and a repeat run skips the work it covers.
+Everything below is in `build/narrative/` of the project, and a repeat run skips the covered work.
 
-- `prose-cache.json`: the spaCy results of each comment passage, keyed by its text. It is discarded
-  when `agentverbs.py`, `words.json`, spaCy or its model changes. spaCy is loaded only for a passage
-  that is not in it.
+- `prose-cache.json`: the spaCy results of each comment passage, keyed by the passage text. It is
+  discarded when `agentverbs.py`, `words.json`, spaCy or the spaCy model changes. spaCy is loaded
+  only for a passage that is not in `prose-cache.json`.
 - `checkstyle.cache`, and the incremental cache of the PMD task: the files with no change since the
   last run are not analysed again.
 - `javac.log`: the output of the last compile.
-- The reports themselves. A Checkstyle or PMD task with no changed input is up to date, and its
-  report stays valid.
+- The reports themselves. A Checkstyle or PMD task with no changed input is up to date, and the
+  task's report stays valid.
 
 Under `--since`, only the passages on changed lines go to spaCy, Checkstyle and PMD read only the
 changed files, and an empty diff is exit 2 before Gradle starts.
@@ -125,9 +125,9 @@ syntax checks are PMD rules.
 **The default PMD of the Gradle pmd plugin is too old.** Gradle 9.4 has PMD 7.13.0, and the first PMD
 with Java 25 is 7.16.0. PMD 7.28.0 is set in the init script.
 
-**A PMD violation of a method is at its name.** A violation on a `MethodDeclaration` has the line of the name
-as both its first and its last line. `javachecks.py` finds the end of a `NAR116` method by brace
-matching, with comments and literals blanked, for `NAR117` and for `--since`.
+**A PMD violation of a method is at the method name.** A violation on a `MethodDeclaration` has the
+line of the name as both the first and the last line. `javachecks.py` finds the end of a `NAR116`
+method by brace matching, with comments and literals blanked, for `NAR117` and for `--since`.
 
 **A parenthesised union with predicates matched nothing in PMD 7.28.**
 `//(MethodCall[@MethodName = 'str'] | ConstructorCall[...])/ArgumentList/StringLiteral` has no
@@ -144,7 +144,7 @@ is ambiguous in a project with two `Flagged.java` files. The init script uses th
 
 **compileJava prints no warning when it is up to date.** Incremental compilation is off in the init
 script, so a compile covers every file. `verify.py` keeps the output of the last compile as
-`javac.log` and reads it again while compileJava is up to date.
+`javac.log` and reads `javac.log` again while compileJava is up to date.
 
 **In GTNHGradle, the Checkstyle extension is set after an `allprojects` block runs**
 (`CodeStyleModule.java`), so a value set there is overwritten. Separate tasks are registered in the
@@ -154,7 +154,7 @@ set.
 **The configuration cache is on in GTNH projects.** `verify.py` passes `--no-configuration-cache`.
 
 **spotless wraps a `//` comment over 120 columns**, and a trailing `// noqa: NARxxx` moves to the next
-line as `// // noqa: NARxxx`. So a noqa covers every line of its comment block, and the code line
+line as `// // noqa: NARxxx`. So a noqa covers every line of the comment block, and the code line
 after a whole-line block.
 
 **In `<pre>{@code …}</pre>`, spotless moves each tag to a separate line.** A plain `<pre>` block and

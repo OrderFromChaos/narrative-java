@@ -1,4 +1,4 @@
-"""Run verify.py on the fixture project and compare each fixture file with its expected code.
+"""Run verify.py on the fixture project and compare each fixture file with the file's expected code.
 
 For a file under fixtures/<code>/ whose name starts with Flagged, the expected codes are that code
 alone. For a file whose name starts with Clean, no code is expected. A warning counts as its code.

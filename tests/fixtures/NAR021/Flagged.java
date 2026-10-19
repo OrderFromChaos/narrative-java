@@ -9,7 +9,7 @@ public final class Flagged {
     /** As the parser. */
     public static final int MODE = 2;
 
-    /** One run of a recipe, as {@link Flagged#size} works it out. */
+    /** The runs of a recipe, as {@link Flagged#size} works them out. */
     public static final int RUN = 3;
 
     /** The values of this kind, where the spec has no range. */
