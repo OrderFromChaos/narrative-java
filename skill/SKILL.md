@@ -440,6 +440,9 @@ CompletableFuture.supplyAsync(() -> computePlan(request))
   generated cases. **Assert a rule, not the implementation's output.** A table of
   `assertEquals("3.12", format(3.12))` is not a test of anything. Never re-implement production math
   in a test. (J1-P32, R2-12)
+  Give such a test both kinds of case: generated cases, and the boundary values of the invariant, so
+  the boundary values are in every run. Generate with jqwik, or with `java.util.Random` and a
+  constant seed, so a failing case is the same on the next run. (J1-P36)
 
 - **A test method name is the rule.** Tests are found by the `@Test` annotation, so no `test`
   prefix is needed: `runningMachineNeverDisplaysZero()`. (J1-P33)
@@ -668,7 +671,10 @@ fits.** (R10-cleanup-rewrite)
 2. Check each fact against its source where you can: the code for a fact about the code, and vanilla
    Minecraft, a spec or a vendor's documentation for a fact from outside the code. Some facts have
    no source you can check, such as a business decision. Keep those.
-3. Drop a fact only when you find it false.
+3. Drop a fact only when you find the fact false. When you find the fact false, and at the same
+   source you find the correct answer to the same question, keep the correct answer in place of the
+   false fact. For `the config is read once, at startup`, where the code reads the config on each
+   world load, keep `the config is read on each world load`. (J1-F11)
 4. Write a new comment from the facts you kept, by the steps of **Writing a comment**.
 
 Reordering or trimming the existing comment's sentences is not a rewrite. The existing comment's
@@ -717,6 +723,16 @@ constant. A requirement on the callers is part of the method's contract, such as
 server thread`. A fact about a method that this method calls is allowed. That call should be in the
 code below the comment.
 
+**Don't describe what a method's callers do** is about the code of the callers. A fact about a value
+from vanilla Minecraft, Forge, another mod or an old save, such as a `null` field or a missing NBT
+tag, is a **Source** fact, even when a caller passes the value to the method. Write such a fact only
+above the code for the value: (J1-F12)
+
+```java
+// worlds saved before 1.2.0 have no "tier" tag
+final int tier = tag.hasKey("tier") ? tag.getInteger("tier") : 1;
+```
+
 **In a PR to another project, leave the comments that exist on the project's base branch as they
 are**, even the ones the diff moves. `verify.py --since` reports only the lines the diff adds or
 changes.
@@ -724,8 +740,9 @@ changes.
 **Comment kinds:** (R10-topic-lists, R10-fp-fn, R10-kinds)
 
 - **Source**: a fact or requirement from outside the code. Test: it would still be true if the code
-  were deleted, and a smart reader wouldn't already know the fact. (R10-Q10, R10-Q14, R10-Q23,
-  R10-Q34, R10-Q43, R10-Q48, R10-Q51, R10-business-case, R10-audience)
+  were deleted, a smart reader wouldn't already know the fact, and the code below the comment
+  depends on the fact. (R10-Q10, R10-Q14, R10-Q23, R10-Q34, R10-Q43, R10-Q48, R10-Q51,
+  R10-business-case, R10-audience, J1-F12)
   - `// the vendor closes idle sockets at 60 s`
   - `// worlds saved before 1.2.0 have no "tier" tag`
   - `WARN_RATE = 1.6; // calibration spec CAL-7, section 3`
@@ -971,12 +988,14 @@ example, GT5's `MultiblockTooltipBuilder` has about 40 `TT_*` fields, such as `T
 `verify.py` runs one Gradle invocation with the init script `narrative.init.gradle`: `spotlessApply`
 (or `spotlessCheck` with `--no-fix`), `compileJava` with the raw-type and unchecked warnings of
 javac, then Checkstyle and PMD with the configs beside `verify.py`. `javachecks.py` then reads the
-comments, runs the prose checks, and merges the three reports into one list with NAR codes. A
-passing run ends with three lists, the input to **Prose review**: every sentence of every comment
-and javadoc, every verb whose subject cannot act, and every sentence with a pronoun. With `--since`,
-the lists cover only the changed lines, and they are printed after the findings too, because
-upstream lines in a diff often still have findings. Without `--since`, `verify.py` prints only the
-first 1000 sentences of the first list. (J1-F01, J1-F09)
+comments, runs the prose checks, and merges the three reports into one list with NAR codes. A run
+with exit 0 or 1 ends with three lists, the input to **Prose review**: every sentence of every
+comment, javadoc and named page, every verb whose subject cannot act, and every sentence with a
+pronoun. On a run with exit 1, `verify.py` prints the lists after the findings, and the count of
+findings last. When Gradle fails, such as on code that does not compile, `verify.py` prints no
+lists, because `javachecks.py` has not read the comments yet. With `--since`, the lists cover only
+the changed lines. Without `--since`, each list stops after 1000 entries, with the command for the
+next 1000. (J1-F01, J1-F09, J1-F14, J1-F15, J1-F16)
 
 | exit | meaning |
 |---|---|
@@ -987,16 +1006,22 @@ first 1000 sentences of the first list. (J1-F01, J1-F09)
 Pass `--max-workers 1` on a busy machine. The job of each tool, the code table and the tool defaults
 that break rules of this skill are in `tooling.md`. Read it before you change a config.
 
+Before the report, for each test that you wrote or changed, name the rule under test and the source
+of the test's cases: a generator, the boundary values or both. Where the answer is not both, fix the
+test. (J1-P36)
+
 ### Prose review
 
-**After a passing `verify.py` run, read the three lists at the end of the output, plus every error
-message, lang entry and help text.** The first list has every sentence of every comment and javadoc.
-The second has each subject that cannot act, paired with the subject's verb, for every verb that is
-neither a `NAR017` finding nor an operation of code. A verb such as `reads` or `runs` is an
-operation of code only with a direct object and code as the verb's subject:
-`PlanLoader reads the plan file`, not `the spec reads`. The third has every sentence with `it`,
-`its` or a standalone `that`, each after the sentence before. Take these steps for each sentence.
-(R10-prose-inventory, R10-closing-review, R11-pronoun-list, R11-literal-review)
+**Fix every finding of `verify.py` first. Then read the three lists at the end of the output, plus
+every error message, lang entry and help text.** You rewrite sentences when you fix findings, so
+read the lists from the run after the fixes. The first list has every sentence of every comment and
+javadoc, and every sentence of each named page. The second has each subject that cannot act, paired
+with the subject's verb, for every verb that is neither a `NAR017` finding nor an operation of code.
+A verb such as `reads` or `runs` is an operation of code only with a direct object and code as the
+verb's subject: `PlanLoader reads the plan file`, not `the spec reads`. The third has every sentence
+with `it`, `its` or a standalone `that`, each after the sentence before. Take these steps for each
+sentence. (R10-prose-inventory, R10-closing-review, R11-pronoun-list, R11-literal-review,
+J1-F14)
 
 1. Name the subject and the verb. Can that subject perform that verb?
 2. For each noun phrase, name the variable, method, file or value that the phrase refers to. If none
@@ -1024,4 +1049,6 @@ each page to `verify.py`, which then runs the prose checks only, with no Gradle 
 python3 "${CLAUDE_SKILL_DIR}/verify.py" README.md docs/report.html
 ```
 
-Handle each finding by the rule **A finding is information**. (R10-published-prose)
+A page named beside Java sources gets the same checks, in the same list of findings. `verify.py`
+prints the three lists of **Prose review** for each named page too. Handle each finding by the rule
+**A finding is information**. (R10-published-prose, J1-F15)

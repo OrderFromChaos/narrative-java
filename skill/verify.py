@@ -11,11 +11,18 @@ unchecked warnings of javac, and checked with Checkstyle and PMD and the configs
 Those tasks come from the init script narrative.init.gradle, so no project file changes. javachecks.py then reads the
 comments, runs the prose checks, and merges the three reports into one list of findings.
 
-A Markdown, HTML or plain text file named on the command line gets the prose checks only, with no
-Gradle project.
+A Markdown, HTML or plain text file named on the command line gets the prose checks of
+javachecks.py, in the same list of findings as the Java sources. A Gradle project is required only
+when Java sources are checked.
+
+After the checks, the output ends with three review lists over the Java sources and the pages: every
+sentence, every subject that cannot act paired with the subject's verb, and every sentence with a
+pronoun. On a run with findings, the lists come after the findings, and the count of findings is the
+last line. verify.py prints no lists on exit 2, or after a Gradle failure. Without --since, each
+list stops after 1000 entries, with the command for the next 1000.
 
 Usage:
-    $ python3 verify.py                          # the mod in the current directory
+    $ python3 verify.py                          # every src/*/java of the mod in the current directory
     $ python3 verify.py --since origin/dev       # only lines changed since merge-base(HEAD, origin/dev)
     $ python3 verify.py --no-fix                 # no re-wrap, and spotlessCheck in place of spotlessApply
     $ python3 verify.py src/main/java/com/example/gui
@@ -53,6 +60,10 @@ GRADLEW = 'gradlew.bat' if sys.platform == 'win32' else 'gradlew'
 JAVA_25_SYNTAX = frozenset({'jvmDowngrader', 'modern'})
 REPORT_DIR = Path('build/narrative')
 CHECK_TASKS = ('narrativeCheckstyle', 'narrativePmd')
+PASS_NOTE = 'A pass is no evidence about the rules that no check implements. Read the lists below.'
+FAILING_RUN_HEADING = (
+    '\n=== review lists from a failing run. Fix the findings above, then read the lists of the next run ==='
+)
 EXIT_SUCCESS = 0
 EXIT_FINDINGS = 1
 EXIT_NO_TOOLCHAIN = 2
@@ -61,13 +72,22 @@ EXIT_NO_TOOLCHAIN = 2
 def main() -> int:
     """Check the prerequisites, run Gradle with the init script, and run javachecks.py on Gradle's reports."""
     parser = argparse.ArgumentParser(description='Run the narrative-java toolchain.')
-    parser.add_argument('paths', nargs='*', type=Path, help='Java source dirs or files, or pages for the prose checks')
+    parser.add_argument(
+        'paths',
+        nargs='*',
+        type=Path,
+        help='Java source dirs or files (default: every src/*/java), or pages for the prose checks',
+    )
     parser.add_argument('--since', help='report only lines changed since merge-base(HEAD, SINCE)')
     parser.add_argument('--no-fix', action='store_true', help='no re-wrap, and spotlessCheck in place of spotlessApply')
     parser.add_argument('--venv', type=Path, default=SHARED_VENV, help=f'the lint venv (default: {SHARED_VENV})')
     parser.add_argument('--gradle', help='the Gradle command, in place of ./gradlew')
     parser.add_argument('--max-workers', type=int, default=2, help='the Gradle worker limit (default: 2)')
-    parser.add_argument('--all-sentences', action='store_true', help='list every sentence, not the first 1000')
+    parser.add_argument(
+        '--all-sentences',
+        action='store_true',
+        help='list every entry of the review lists, not the first 1000 of each',
+    )
     args = parser.parse_args()
     print(f'narrative-java skill: {readInstalledVersion()}', flush=True)
 
@@ -78,8 +98,10 @@ def main() -> int:
         return EXIT_NO_TOOLCHAIN
 
     pages = [path for path in args.paths if path.suffix.lower() in PROSE_SUFFIXES]
-    if pages and len(pages) == len(args.paths):
-        return checkPages(venv_python, pages)
+    java_sources = [path for path in args.paths if path.suffix.lower() not in PROSE_SUFFIXES]
+    if pages and not java_sources:
+        page_targets = [str(page) for page in pages]
+        return reportFindings(venv_python, page_targets, page_targets, all_sentences=args.all_sentences)
 
     project_dir = Path.cwd()
     try:
@@ -90,7 +112,7 @@ def main() -> int:
         return EXIT_NO_TOOLCHAIN
 
     report_dir = project_dir / REPORT_DIR
-    sources = args.paths or [project_dir / 'src' / 'main' / 'java']
+    sources = java_sources or sorted((project_dir / 'src').glob('*/java')) or [project_dir / 'src' / 'main' / 'java']
     try:
         changed_files = readChangedFiles(args.since, project_dir) if args.since else None
     except PrerequisiteError as exc:
@@ -121,6 +143,8 @@ def main() -> int:
         print(f'verify.py: Gradle found no JDK for the build: {gradle_run.missing_jdk}', file=sys.stderr)
         return EXIT_NO_TOOLCHAIN
 
+    # verify.py prints no review lists here. javachecks.py has not read the comments yet, so the comments can
+    # still have prose findings, and the sentences of the lists change with each fix of a prose finding
     if gradle_run.failed_tasks:
         print(gradle_run.output_tail)
         return EXIT_FINDINGS
@@ -135,30 +159,68 @@ def main() -> int:
         print(f'verify.py: Gradle wrote no {", ".join(missing_reports)}', file=sys.stderr)
         return EXIT_NO_TOOLCHAIN
 
-    targets = [str(path) for path in sources]
+    targets = [str(path) for path in [*sources, *pages]]
     since = ['--since', args.since] if args.since else []
     since.extend(['--cache', str(report_dir / 'prose-cache.json')])
     report_arguments = ['--pmd', str(reports[0]), '--checkstyle', str(reports[1]), '--javac', str(reports[2])]
+    return reportFindings(
+        venv_python,
+        [*targets, *report_arguments, *since],
+        [*targets, *since],
+        all_sentences=args.all_sentences,
+    )
+
+
+def reportFindings(
+    venv_python: Path,
+    check_arguments: list[str],
+    list_arguments: list[str],
+    *,
+    all_sentences: bool,
+) -> int:
+    """Print the findings of javachecks.py, then the three review lists.
+
+    On a run with findings, the lists come under FAILING_RUN_HEADING, and the count line of javachecks.py
+    comes last.
+
+    Returns:
+        The exit code of javachecks.py.
+    """
     checked = subprocess.run(
-        [str(venv_python), str(SKILL_DIR / 'javachecks.py'), *targets, *report_arguments, *since],
+        [str(venv_python), str(SKILL_DIR / 'javachecks.py'), *check_arguments],
+        stdout=subprocess.PIPE,
+        text=True,
         check=False,
     )
-    # in a PR, the upstream lines in a diff usually still have findings. So with --since, the lists are
-    # printed after the findings too. They cover only the changed lines
-    with_lists = checked.returncode == EXIT_SUCCESS or (checked.returncode == EXIT_FINDINGS and args.since)
-    if not with_lists:
+    if checked.returncode == EXIT_SUCCESS:
+        print(checked.stdout, end='')
+        print(PASS_NOTE, flush=True)
+        printReviewLists(venv_python, list_arguments, all_sentences=all_sentences)
+        return EXIT_SUCCESS
+
+    if checked.returncode != EXIT_FINDINGS:
+        print(checked.stdout, end='')
         return checked.returncode
 
-    if checked.returncode == EXIT_SUCCESS:
-        print('A pass is no evidence about the rules that no check implements. Read the lists below.', flush=True)
-    else:
-        print('Fix the findings above, then read the lists below.', flush=True)
-    every = ['--all-sentences'] if args.all_sentences else []
-    subprocess.run(
-        [str(venv_python), str(SKILL_DIR / 'javachecks.py'), *targets, *since, '--prose', *every],
-        check=False,
-    )
-    return checked.returncode
+    # the last line of javachecks.py has the count of findings. verify.py prints that line last, after the lists
+    *finding_lines, count_line = checked.stdout.splitlines() or ['']
+    print('\n'.join(finding_lines))
+    print(FAILING_RUN_HEADING, flush=True)
+    printReviewLists(venv_python, list_arguments, all_sentences=all_sentences)
+    print(f'\n{count_line}')
+    return EXIT_FINDINGS
+
+
+def printReviewLists(venv_python: Path, arguments: list[str], *, all_sentences: bool) -> None:
+    """Print the three lists for Prose review in SKILL.md, with javachecks.py --prose.
+
+    Args:
+        venv_python: The interpreter of the lint venv, with spaCy.
+        arguments: The Java sources and pages, then the --since and --cache arguments of this run.
+        all_sentences: List every entry, not only the first 1000 of each list.
+    """
+    every = ['--all-sentences'] if all_sentences else []
+    subprocess.run([str(venv_python), str(SKILL_DIR / 'javachecks.py'), *arguments, '--prose', *every], check=False)
 
 
 def rewrapComments(venv_python: Path, sources: list[Path], since: str | None) -> str:
@@ -199,18 +261,6 @@ def missingVenvModules(venv_python: Path) -> list[str]:
 def setupCommands(venv: Path) -> str:
     lock_path = SKILL_DIR / 'requirements-lock.txt'
     return f'    uv venv --python 3.11 {venv}\n    uv pip install --python {venv / VENV_PYTHON} -r {lock_path}'
-
-
-def checkPages(venv_python: Path, pages: list[Path]) -> int:
-    """Run the wording checks and the agent-verb checks on pages, with no Gradle project."""
-    targets = [str(page) for page in pages]
-    wording = subprocess.run([sys.executable, str(SKILL_DIR / 'checks.py'), *targets], check=False)
-    verbs = subprocess.run([str(venv_python), str(SKILL_DIR / 'agentverbs.py'), *targets], check=False)
-    return (
-        EXIT_FINDINGS
-        if EXIT_FINDINGS in {wording.returncode, verbs.returncode}
-        else max(wording.returncode, verbs.returncode)
-    )
 
 
 def readGradleProperties(properties_path: Path) -> GradleSettings:

@@ -12,6 +12,9 @@ Usage:
     $ python3 javachecks.py src/main/java --pmd build/narrative/pmd.xml --checkstyle build/narrative/checkstyle.xml
     $ python3 javachecks.py src/main/java --prose
     $ python3 javachecks.py src/main/java --prose --from-sentence 1001
+    $ python3 javachecks.py src/main/java --prose --from-pair 1001
+    $ python3 javachecks.py src/main/java README.md docs/page.html
+    $ python3 javachecks.py src/main/java README.md docs/page.html --prose
     $ python3 javachecks.py src/main/java --cache build/narrative/prose-cache.json
 
 One line per finding, and a warning has the word `warning` before the warning's code:
@@ -27,6 +30,14 @@ the line of the type's declaration.
 With --cache PATH, the spaCy results of each passage are kept in PATH between runs, keyed by the
 text of the passage. The cache is discarded when agentverbs.py, words.json, spaCy or the spaCy
 model changes, and spaCy is loaded only when a passage is not in the cache.
+
+A Markdown, HTML or plain text page named on the command line gets the prose checks, and with
+--prose, the lists cover the page too. The diff of --since has .java files only, so a page is
+checked and listed whole.
+
+With --prose and without --since, each of the three lists stops after 1000 entries, with the
+command for the next 1000 entries of that list. --from-sentence, --from-pair and --from-pronoun
+print only the list they name, from the given entry. With --all-sentences, every entry is listed.
 
 Exit codes:
     0  no finding. Warnings may be printed
@@ -53,7 +64,7 @@ from pathlib import Path
 
 import agentverbs
 import checks
-from prose import Passage
+from prose import PROSE_SUFFIXES, Passage, readPassages
 
 
 WORDS_PATH = Path(__file__).resolve().parent / 'words.json'
@@ -97,6 +108,8 @@ CHECKSTYLE_CODES = {
     'PackageName': 'NAR130',
     'ParameterNumber': 'NAR131',
 }
+# the length of the sentence page of checks.py, for each of the three review lists
+LIST_PAGE = checks.SENTENCE_PAGE
 EXIT_SUCCESS = 0
 EXIT_FINDINGS = 1
 EXIT_UNREADABLE = 2
@@ -105,7 +118,12 @@ EXIT_UNREADABLE = 2
 def main() -> int:
     """Check the Java files below the given paths, merge the tool reports, and print the findings."""
     parser = argparse.ArgumentParser(description='Check Java sources for the narrative-java rules.')
-    parser.add_argument('paths', nargs='+', type=Path, help='Java files, or directories to search for them')
+    parser.add_argument(
+        'paths',
+        nargs='+',
+        type=Path,
+        help='Java files, directories to search for them, and pages',
+    )
     parser.add_argument('--pmd', type=Path, help='the XML report of the narrativePmd task')
     parser.add_argument('--checkstyle', type=Path, help='the XML report of the narrativeCheckstyle task')
     parser.add_argument('--javac', type=Path, help='the Gradle output of the compileJava run')
@@ -113,22 +131,26 @@ def main() -> int:
     parser.add_argument(
         '--prose',
         action='store_true',
-        help='list every sentence of every comment, and the review lists',
+        help='list every sentence of every comment, javadoc and page, and the review lists',
     )
-    parser.add_argument('--from-sentence', type=int, default=1, help='with --prose, start the sentence list here')
-    parser.add_argument('--all-sentences', action='store_true', help='with --prose, list every sentence')
+    paging = parser.add_mutually_exclusive_group()
+    paging.add_argument('--from-sentence', type=int, help='with --prose, list only the sentences, from this one')
+    paging.add_argument('--from-pair', type=int, help='with --prose, list only the subject-verb pairs, from this one')
+    paging.add_argument('--from-pronoun', type=int, help='with --prose, list only the pronoun sentences, from this one')
+    parser.add_argument('--all-sentences', action='store_true', help='with --prose, list every entry of every list')
     parser.add_argument('--cache', type=Path, help='a file that keeps the spaCy results between runs')
     parser.add_argument('--rewrap', action='store_true', help='re-wrap ragged javadoc and long // comments in place')
     args = parser.parse_args()
 
     java_paths = discoverJava(args.paths)
-    if not java_paths:
+    page_paths = [path for path in args.paths if path.suffix.lower() in PROSE_SUFFIXES]
+    if not java_paths and not page_paths:
         print(f'javachecks.py: no .java file below {", ".join(map(str, args.paths))}', file=sys.stderr)
         return EXIT_UNREADABLE
 
     try:
         tool_findings = readToolReports(args.pmd, args.checkstyle, args.javac)
-        changed = readChangedLines(args.since, java_paths[0].parent) if args.since else None
+        changed = readChangedLines(args.since, (java_paths or page_paths)[0].parent) if args.since else None
     except ReportError as exc:
         print(f'javachecks.py: {exc}', file=sys.stderr)
         return EXIT_UNREADABLE
@@ -151,8 +173,19 @@ def main() -> int:
 
     prose = ProseReader.open(args.cache)
     if args.prose:
-        page = None if changed is not None or args.all_sentences else Page(args.from_sentence, args.paths)
-        for line in proseInventory(prose, java_paths, changed, page):
+        starts = {
+            '--from-sentence': args.from_sentence,
+            '--from-pair': args.from_pair,
+            '--from-pronoun': args.from_pronoun,
+        }
+        flag, first = next(((flag, first) for flag, first in starts.items() if first is not None), (None, 1))
+        cache = ['--cache', str(args.cache)] if args.cache else []
+        list_page = (
+            None
+            if changed is not None or args.all_sentences
+            else ListPage(flag, first, [*map(str, args.paths), *cache])
+        )
+        for line in proseInventory(prose, java_paths, page_paths, changed, list_page):
             print(line)
         prose.save()
         return EXIT_SUCCESS
@@ -160,11 +193,14 @@ def main() -> int:
     findings: list[JavaFinding] = []
     for java_path in java_paths:
         findings.extend(checkFile(prose, java_path, tool_findings.get(java_path.resolve(), []), changed))
+    for page_path in page_paths:
+        findings.extend(checkPage(prose, page_path))
     prose.save()
     for finding in findings:
         print(finding)
     failing = [finding for finding in findings if not finding.warning]
-    print(f'{len(failing)} findings, {len(findings) - len(failing)} warnings over {len(java_paths)} files')
+    file_count = len(java_paths) + len(page_paths)
+    print(f'{len(failing)} findings, {len(findings) - len(failing)} warnings over {file_count} files')
     return EXIT_FINDINGS if failing else EXIT_SUCCESS
 
 
@@ -325,38 +361,77 @@ def runGit(arguments: list[str], repo_path: Path) -> str:
 def proseInventory(
     prose: ProseReader,
     java_paths: list[Path],
+    page_paths: list[Path],
     changed: ChangedLines | None,
-    page: Page | None,
+    list_page: ListPage | None,
 ) -> list[str]:
-    """List every sentence of every comment, every review pair that is not a NAR017 finding, and every pronoun.
+    """List every sentence of every comment and page, every review pair that is not a NAR017 finding, and every pronoun.
 
-    With a page, the sentence list stops after SENTENCE_PAGE sentences, with the command for the next page.
+    With a ListPage, each list printed stops after LIST_PAGE entries, with the command for the next entries
+    of that list. Every sentence of a named page is listed, also under --since.
     """
     sentences: list[str] = []
     pairs: list[str] = []
     pronouns: list[str] = []
-    for java_path in java_paths:
-        reading = readComments(java_path.read_text(encoding='utf-8', errors='replace'))
-        for passage in reading.passages:
-            if inChange(changed, java_path, set(passage.lines)):
-                sentences.extend(f'{java_path}:{line}: {sentence}' for line, sentence in passage.sentences())
+    readings = [
+        (path, readComments(path.read_text(encoding='utf-8', errors='replace')).passages) for path in java_paths
+    ]
+    readings.extend((path, readPassages(path)) for path in page_paths)
+    for file_path, passages in readings:
+        for passage in passages:
+            if file_path.suffix.lower() in PROSE_SUFFIXES or inChange(changed, file_path, set(passage.lines)):
+                sentences.extend(f'{file_path}:{line}: {sentence}' for line, sentence in passage.sentences())
                 pairs.extend(
-                    f'{java_path}:{passage.lineOf(pair)}: {pair!r}' for pair in prose.reviewPairs(passage.text)
+                    f'{file_path}:{passage.lineOf(pair)}: {pair!r}' for pair in prose.reviewPairs(passage.text)
                 )
                 pronouns.extend(
-                    f'{java_path}:{sentenceLine(passage, sentence)}: {note}'
+                    f'{file_path}:{sentenceLine(passage, sentence)}: {note}'
                     for sentence, note in prose.pronounNotes(passage.text)
                 )
-    if page is not None:
-        sentences = checks.sentencePage(sentences, page.first, program='javachecks.py', paths=page.paths)
-    return [
-        '--- every sentence of every comment and javadoc: read each against SKILL.md, Comments ---',
-        *sentences,
-        '--- every subject that cannot act, with its verb: can that subject perform that verb? ---',
-        *(pairs or ['(none)']),
-        '--- every sentence with a pronoun, after the one before it: which noun does each pronoun stand for? ---',
-        *(pronouns or ['(none)']),
-    ]
+    review_lists = (
+        (
+            '--from-sentence',
+            'sentences',
+            '--- every sentence of every comment, javadoc and page: read each against SKILL.md, Comments ---',
+            sentences,
+        ),
+        (
+            '--from-pair',
+            'pairs',
+            '--- every subject that cannot act, with its verb: can that subject perform that verb? ---',
+            pairs,
+        ),
+        (
+            '--from-pronoun',
+            'pronoun sentences',
+            '--- every sentence with a pronoun, after the one before it: which noun does each pronoun stand for? ---',
+            pronouns,
+        ),
+    )
+    listed: list[str] = []
+    for flag, unit, heading, entries in review_lists:
+        if list_page is not None and list_page.flag not in {None, flag}:
+            continue
+        shown = entries
+        if list_page is not None:
+            first = list_page.first if list_page.flag == flag else 1
+            shown = cutList(entries, first, unit=unit, flag=flag, arguments=list_page.arguments)
+        listed.extend([heading, *(shown or ['(none)'])])
+    return listed
+
+
+def cutList(entries: list[str], first: int, *, unit: str, flag: str, arguments: list[str]) -> list[str]:
+    """Cut one review list to LIST_PAGE entries from entry `first`, counted from 1.
+
+    Returns:
+        The entries, then a line with the number left out and the command for the next entries of the list.
+    """
+    end = first - 1 + LIST_PAGE
+    shown = entries[first - 1 : end]
+    if end < len(entries):
+        command = ' '.join(['javachecks.py', '--prose', flag, str(end + 1), *arguments])
+        shown.append(f'... {len(entries) - end} left out of {len(entries)} {unit}. For the next {LIST_PAGE}: {command}')
+    return shown
 
 
 def sentenceLine(passage: Passage, sentence: str) -> int:
@@ -364,6 +439,23 @@ def sentenceLine(passage: Passage, sentence: str) -> int:
     offset = max(passage.text.find(sentence), 0)
     ends = list(itertools.accumulate(len(text) + 1 for text in passage.texts))
     return passage.lines[min(bisect.bisect_right(ends, offset), len(passage.lines) - 1)]
+
+
+def checkPage(prose: ProseReader, page_path: Path) -> list[JavaFinding]:
+    """Run the wording checks of checks.py and the agent-verb checks of agentverbs.py on one page.
+
+    Returns:
+        The findings, sorted by line, or only the NAR000 finding of checks.py for a page that cannot be read.
+    """
+    wording = [JavaFinding(page_path, found.line, found.code, found.detail) for found in checks.checkPage(page_path)]
+    if any(finding.code == 'NAR000' for finding in wording):
+        return wording
+
+    verbs = [
+        JavaFinding(page_path, found.line, found.code, repr(found.hit))
+        for found in agentverbs.checkFile(prose.sentenceReader(), page_path)
+    ]
+    return sorted([*wording, *verbs], key=lambda finding: (finding.line, finding.code))
 
 
 def checkFile(
@@ -1061,11 +1153,16 @@ class PassageHits:
 
 
 @dataclass(frozen=True)
-class Page:
-    """The page of the sentence list that --prose prints: the first sentence, and the paths for the next command."""
+class ListPage:
+    """The part of the three lists that --prose prints.
 
+    `flag` is the option of the one list to print, from entry `first`, or None for every list from entry 1.
+    The arguments are the paths and the cache, for the command of the next entries.
+    """
+
+    flag: str | None
     first: int
-    paths: list[Path]
+    arguments: list[str]
 
 
 class ProseReader:

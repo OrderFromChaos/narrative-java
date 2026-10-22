@@ -33,8 +33,9 @@ narrative-java repository. `sync_prose.py --check` exits 1 when a copy differs f
 Run order: spotless, then compileJava, then Checkstyle and PMD, then `javachecks.py`. `verify.py`
 runs them in that order, so use `verify.py` rather than reproducing the sequence.
 
-A Markdown, HTML or plain text file named to `verify.py` gets the prose checks only. In a page,
-`<!-- noqa: NAR017 -->` silences a code on the same line.
+A Markdown, HTML or plain text file named to `verify.py` gets the prose checks only, also when
+named beside Java sources. `javachecks.py` runs those checks. In a page, `<!-- noqa: NAR017 -->`
+silences a code on the same line.
 
 ## The codes
 
